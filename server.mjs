@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { validateCheckPayload, validateColumnsPayload, validateScribePayload } from "./src/server/validate.js";
 import { mockReadColumns } from "./src/server/mock-reader.js";
 import { mockCheck, mockScribe } from "./src/server/mock-talk.js";
+import { ClaudeError, createClaude, DEFAULT_MODEL } from "./src/server/claude.js";
 import { isAuthorized, SECURITY_HEADERS, startupProblem } from "./src/server/auth.js";
 import { createLimiter } from "./src/server/limits.js";
 
@@ -16,7 +17,7 @@ const PASSWORD = process.env.APP_PASSWORD ?? "";
 const PUBLIC_DEMO = process.env.PUBLIC_DEMO === "1";
 const limiter = createLimiter({
   perMinute: Number(process.env.LIMIT_PER_MINUTE ?? 40),
-  perDay: Number(process.env.LIMIT_PER_DAY ?? 3000),
+  perDay: Number(process.env.LIMIT_PER_DAY ?? 500),
 });
 
 const problem = startupProblem({ host: HOST, password: PASSWORD });
@@ -69,15 +70,33 @@ const sendJson = (res, status, data) => {
 
 const VILLAGE = JSON.parse(await readFile(join(ROOT, "samples", "hakka-village.config.json"), "utf-8"));
 
+// 鍵が無ければ仮の答えで動く。鍵があるのに失敗したときは、仮の答えに逃げず失敗と返す
+const MOCK = {
+  readColumns: (p) => ({ results: mockReadColumns(p) }),
+  scribe: (p) => ({ updates: mockScribe(p.memo) }),
+  check: (p) => ({
+    findings: mockCheck({ plan: p.plan, gaps: p.gaps, targetMinutes: VILLAGE.evacuationTargetMinutes, yardstick: VILLAGE.yardsticks[0] }),
+  }),
+};
+
+async function connectClaude() {
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  return createClaude({
+    client: new Anthropic({ timeout: 60_000, maxRetries: 1 }),
+    village: VILLAGE,
+    model: process.env.CLAUDE_MODEL || DEFAULT_MODEL,
+    // 量と時間だけ残す。中身は残さない
+    onUsage: ({ role, model, usage, ms }) => console.log(role, model, `in=${usage.input_tokens}`, `out=${usage.output_tokens}`, `${ms}ms`),
+  });
+}
+
+const MODE = process.env.ANTHROPIC_API_KEY ? "claude" : "mock";
+const ENGINE = MODE === "claude" ? await connectClaude() : MOCK;
+
 const API = {
-  "/api/read-columns": { validate: validateColumnsPayload, run: (p) => ({ results: mockReadColumns(p) }) },
-  "/api/scribe": { validate: validateScribePayload, run: (p) => ({ updates: mockScribe(p.memo) }) },
-  "/api/check": {
-    validate: validateCheckPayload,
-    run: (p) => ({
-      findings: mockCheck({ plan: p.plan, gaps: p.gaps, targetMinutes: VILLAGE.evacuationTargetMinutes, yardstick: VILLAGE.yardsticks[0] }),
-    }),
-  },
+  "/api/read-columns": { validate: validateColumnsPayload, run: (p) => ENGINE.readColumns(p) },
+  "/api/scribe": { validate: validateScribePayload, run: (p) => ENGINE.scribe(p) },
+  "/api/check": { validate: validateCheckPayload, run: (p) => ENGINE.check(p) },
 };
 
 async function handleApi(req, res, route) {
@@ -90,8 +109,9 @@ async function handleApi(req, res, route) {
   const errors = route.validate(payload);
   if (errors.length > 0) return sendJson(res, 422, { errors });
   try {
-    return sendJson(res, 200, { mode: "mock", ...route.run(payload) });
+    return sendJson(res, 200, { mode: MODE, ...(await route.run(payload)) });
   } catch (e) {
+    if (e instanceof ClaudeError) return sendJson(res, e.status, { errors: [e.message] });
     // 中身はログに残さない
     console.error("処理に失敗しました", e.name);
     return sendJson(res, 500, { errors: ["処理に失敗しました"] });
@@ -100,7 +120,12 @@ async function handleApi(req, res, route) {
 
 const server = createServer(async (req, res) => {
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
-  const { pathname } = new URL(req.url, "http://localhost");
+  let pathname;
+  try {
+    ({ pathname } = new URL(req.url, "http://localhost"));
+  } catch {
+    return sendJson(res, 400, { errors: ["使えない操作です"] });
+  }
   if (req.method === "GET" && pathname === "/healthz") {
     res.writeHead(200, { "Content-Type": "text/plain" });
     return res.end("ok");
@@ -111,7 +136,8 @@ const server = createServer(async (req, res) => {
   }
   if (req.method === "GET" && pathname === "/api/config") return sendJson(res, 200, { publicDemo: PUBLIC_DEMO });
   if (req.method === "POST" && API[pathname]) {
-    const client = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress).split(",")[0].trim();
+    // 手前の値は名乗り放題なので、置き場のプロキシが最後に足した値を使う
+    const client = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress).split(",").at(-1).trim();
     const limit = limiter.check(client);
     if (!limit.ok) return sendJson(res, 429, { errors: [limit.reason] });
     return handleApi(req, res, API[pathname]);

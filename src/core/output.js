@@ -26,6 +26,8 @@ export function evacuationSentence(plan, whoLabel) {
   const means = val(plan.evacuation.means);
   const minutes = totalMinutes(plan);
   if (!means || minutes === null) return "";
+  // null は「誰と」を出さないとき（手伝う人の同意がない）
+  if (whoLabel === null) return `${means}で、準備を入れて${minutes}分`;
   return `${whoLabel || "（誰と行くかは未決定）"}${whoLabel ? "と" : "。"}${means}で、準備を入れて${minutes}分`;
 }
 
@@ -78,6 +80,8 @@ export function buildOneSheet({ plan, identity, people = [] }) {
 export function formatPhone(digits) {
   if (!digits) return "";
   if (digits.length === 11) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+  // 区切りが無いと、Excel で開いたときに先頭の 0 が消える。市外局番の長さは分からないので、4桁で区切る
+  if (digits.length === 10) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`;
   return digits;
 }
 
@@ -117,7 +121,7 @@ export function buildVillageRow({ plan, identity, people = [], config, createdOn
     避難時の配慮事項: considerations,
     要介護度: val(plan.care.level),
     自宅の災害リスク: val(plan.hazards.items),
-    避難方法: evacuationSentence(plan, h1.relation),
+    避難方法: evacuationSentence(plan, plan.consent.helper === "yes" ? h1.relation : null),
     特記事項: "",
     作成日: createdOn,
   };
@@ -135,7 +139,7 @@ export function buildVillageRow({ plan, identity, people = [], config, createdOn
 
 const csvCell = (v) => {
   // 表計算ソフトで数式として動かないようにする
-  const safe = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+  const safe = /^[=+\-@]/.test(String(v).normalize("NFKC").trimStart()) ? `'${v}` : v;
   return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 };
 

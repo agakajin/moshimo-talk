@@ -1,6 +1,6 @@
 // 訪問の画面。声メモは送る前に伏せ、送る中身をそのまま見せる
 import { applyUpdates, editField, planForClaude, serviceGaps } from "/core/plan.js";
-import { findLeaks, redact } from "/core/redact.js";
+import { findLeaks, redact, redactDeep } from "/core/redact.js";
 import { nextTopic, REQUEST_NOTE } from "/core/talk.js";
 import { startWrap } from "/wrap.js";
 
@@ -53,13 +53,14 @@ export function startTalk(state, { script = null } = {}) {
   const skipped = [];
   const shownInterrupts = new Set();
   let findings = [];
+  let checkError = "";
   let interrupt = null;
   let memoCount = 0;
 
   const known = [
     { value: identity["self.name"], alias: "本人" },
     { value: identity["self.kana"], alias: "本人" },
-    { value: identity["self.address"], alias: "自宅" },
+    { value: identity["self.address"], alias: "自宅", kind: "address" },
     { value: identity["emergency.name"], alias: "緊急連絡先" },
   ];
   // 性別は「女」など一般の言葉なので、漏れの検査の対象にしない
@@ -137,7 +138,9 @@ export function startTalk(state, { script = null } = {}) {
         return label;
       }));
     }
-    $("findings").replaceChildren(...(findings.length
+    $("findings").replaceChildren(...(checkError
+      ? [el("li", { className: "notice", textContent: checkError })]
+      : findings.length
       ? findings.map((f) => el("li", { textContent: `${f.text}（${f.yardstick}）` }))
       : [el("li", { className: "hint", textContent: "今のところありません。" })]));
   }
@@ -153,6 +156,9 @@ export function startTalk(state, { script = null } = {}) {
     $("sentRaw").textContent = `${label}\n${JSON.stringify(body, null, 2)}`;
   }
 
+  // 手で直した欄も、送る形にするときは置き換える
+  const planToSend = () => redactDeep(planForClaude(plan), known);
+
   function guarded(body) {
     const leaks = findLeaks(body, secrets);
     if (leaks.length > 0) throw new Error("本物の名前や番号が残っていたので、送らずに止めました。文字を直してください。");
@@ -165,12 +171,18 @@ export function startTalk(state, { script = null } = {}) {
   }
 
   async function refreshFindings() {
-    const body = guarded({ plan: planForClaude(plan), gaps });
-    const data = await post("/api/check", body);
-    markMode(data.mode);
-    findings = data.findings;
-    interrupt = findings.find((f) => f.interrupt && !shownInterrupts.has(f.id)) ?? null;
-    if (interrupt) shownInterrupts.add(interrupt.id);
+    try {
+      const body = guarded({ plan: planToSend(), gaps });
+      const data = await post("/api/check", body);
+      markMode(data.mode);
+      findings = data.findings;
+      checkError = "";
+      interrupt = findings.find((f) => f.interrupt && !shownInterrupts.has(f.id)) ?? null;
+      if (interrupt) shownInterrupts.add(interrupt.id);
+    } catch (e) {
+      // 「ありません」と見えないよう、点検できなかったことを出す
+      checkError = `点検できませんでした。${e.message}`;
+    }
     renderOpener();
     renderRequests();
   }
@@ -182,7 +194,7 @@ export function startTalk(state, { script = null } = {}) {
     $("addMemo").disabled = true;
     try {
       const memo = redact(raw, known);
-      const body = guarded({ memo, plan: planForClaude(plan) });
+      const body = guarded({ memo, plan: planToSend() });
       showSent("書き取り役へ", body);
       const data = await post("/api/scribe", body);
       markMode(data.mode);

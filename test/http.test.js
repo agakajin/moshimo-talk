@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { isAuthorized, startupProblem } from "../src/server/auth.js";
 
@@ -10,7 +11,7 @@ const PASSWORD = "test-only-password";
 const basic = (p) => `Basic ${Buffer.from(`demo:${p}`).toString("base64")}`;
 
 function run(env) {
-  const child = spawn(process.execPath, [SERVER], { env: { ...process.env, ...env, PORT: "0" } });
+  const child = spawn(process.execPath, [SERVER], { env: { ...process.env, ANTHROPIC_API_KEY: "", ...env, PORT: "0" } });
   const ready = new Promise((resolve, reject) => {
     let err = "";
     child.stderr.on("data", (d) => { err += d; });
@@ -84,4 +85,66 @@ test("公開デモの設定と、回数の上限が効く", async (t) => {
   assert.deepEqual(await first.json(), { errors: ["処理に失敗しました"] });
   assert.equal((await post()).status, 429);
   assert.equal((await fetch(`${base}/healthz`)).status, 200);
+});
+
+// 本物の部品（SDK）を通し、向こう側だけ偽物にする
+function fakeAnthropic(reply) {
+  const requests = [];
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (d) => { body += d; });
+    req.on("end", () => {
+      requests.push({ url: req.url, headers: req.headers, body: JSON.parse(body) });
+      const { status, json } = reply();
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(json));
+    });
+  });
+  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve({ server, requests, url: `http://127.0.0.1:${server.address().port}` })));
+}
+const message = (answer) => ({
+  id: "msg_test", type: "message", role: "assistant", model: "claude-opus-5-5", stop_reason: "end_turn", stop_sequence: null,
+  usage: { input_tokens: 10, output_tokens: 5 },
+  content: [{ type: "thinking", thinking: "", signature: "x" }, { type: "text", text: JSON.stringify(answer) }],
+});
+const COLUMNS = { columns: [{ header: "氏名", withheld: false, samples: ["文字列1"] }] };
+const postColumns = (base) => fetch(`${base}/api/read-columns`, { method: "POST", body: JSON.stringify(COLUMNS) });
+
+test("鍵があれば部品を通して Claude を呼び、mode で分かる", async (t) => {
+  const api = await fakeAnthropic(() => ({ status: 200, json: message({ results: [{ header: "氏名", target: "self.name", confidence: "high" }] }) }));
+  t.after(() => api.server.close());
+  const { child, ready } = run({ HOST: "127.0.0.1", APP_PASSWORD: "", ANTHROPIC_API_KEY: "test-only-key", ANTHROPIC_BASE_URL: api.url });
+  t.after(() => child.kill());
+  const res = await postColumns(`http://127.0.0.1:${await ready}`);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.mode, "claude");
+  assert.deepEqual(data.results, [{ header: "氏名", target: "self.name", confidence: "high" }]);
+
+  const [sent] = api.requests;
+  assert.match(sent.url, /^\/v1\/messages/);
+  assert.equal(sent.headers.authorization, "Bearer test-only-key");
+  assert.match(sent.headers["anthropic-beta"], /server-side-fallback-2026-07-01/);
+  assert.equal(sent.body.fallbacks, "default");
+  assert.ok(!("betas" in sent.body), "betas は見出しで送る");
+  assert.equal(sent.body.model, "claude-opus-5-5");
+  assert.equal(sent.body.output_config.format.type, "json_schema");
+});
+
+test("Claude が失敗したら、仮の答えに逃げず失敗と返す", async (t) => {
+  const api = await fakeAnthropic(() => ({ status: 400, json: { type: "error", error: { type: "invalid_request_error", message: "秘密の文" } } }));
+  t.after(() => api.server.close());
+  const { child, ready } = run({ HOST: "127.0.0.1", APP_PASSWORD: "", ANTHROPIC_API_KEY: "test-only-key", ANTHROPIC_BASE_URL: api.url });
+  t.after(() => child.kill());
+  const res = await postColumns(`http://127.0.0.1:${await ready}`);
+  assert.equal(res.status, 502);
+  const data = await res.json();
+  assert.deepEqual(data, { errors: ["Claude につながりませんでした"] });
+});
+
+test("鍵が無ければ仮の答えと分かる", async (t) => {
+  const { child, ready } = run({ HOST: "127.0.0.1", APP_PASSWORD: "" });
+  t.after(() => child.kill());
+  const res = await postColumns(`http://127.0.0.1:${await ready}`);
+  assert.equal((await res.json()).mode, "mock");
 });

@@ -1,4 +1,8 @@
-// サーバーの入口で、記号以外が混ざっていないかを調べる。本物の値が届いたら Claude に渡さず止める
+// サーバーの入口で、記号以外や、番号・日付・住所・名前の形を調べる。手元に無い値の照合はできないので、ブラウザの置き換えとあわせて守る
+import { looksLikeValue } from "../core/mask.js";
+import { createPlan } from "../core/plan.js";
+import { personalKind } from "../core/redact.js";
+
 const SYMBOL = /^(?:空|(?:文字列|電話番号|郵便番号|住所|日付)\d+)$/;
 const MAX_COLUMNS = 200;
 const MAX_HEADER = 60;
@@ -17,6 +21,8 @@ export function validateColumnsPayload(payload) {
     if (extra.length > 0) errors.push(`${i + 1}列目：決まった項目以外が入っています`);
     if (typeof c?.header !== "string" || c.header.length === 0 || c.header.length > MAX_HEADER) {
       errors.push(`${i + 1}列目：見出しの形が正しくありません`);
+    } else if (looksLikeValue(c.header)) {
+      errors.push(`${i + 1}列目：見出しに本物の値らしいものがあります`);
     }
     if (!Array.isArray(c?.samples) || !c.samples.every((s) => typeof s === "string" && SYMBOL.test(s))) {
       errors.push(`${i + 1}列目：記号でない値が入っています`);
@@ -26,8 +32,15 @@ export function validateColumnsPayload(payload) {
   return errors;
 }
 
-const PHONE_LIKE = /\d[\d\-‐()\s]{7,}\d/;
 const LIMIT = 8000;
+const PLAN_KEYS = new Set(Object.keys(createPlan()));
+const HELPER_KEYS = new Set(["alias", "asked", "awayWeekdayDaytime", "memoId"]);
+
+function strings(node, out = []) {
+  if (typeof node === "string") out.push(node);
+  else if (node !== null && typeof node === "object") Object.values(node).forEach((v) => strings(v, out));
+  return out;
+}
 
 function checkPlanPayload(payload, allowed) {
   const extra = Object.keys(payload ?? {}).filter((k) => !allowed.includes(k));
@@ -36,7 +49,14 @@ function checkPlanPayload(payload, allowed) {
   if (payload.plan.care?.weekly?.value?.unread) return ["読めなかった予定の文は送れません"];
   const text = JSON.stringify(payload);
   if (text.length > LIMIT) return ["内容が長すぎます"];
-  if (PHONE_LIKE.test(text)) return ["電話番号らしい数字が入っています"];
+  if (Object.keys(payload.plan).some((k) => !PLAN_KEYS.has(k))) return ["計画に決まった項目以外が入っています"];
+  const helpers = payload.plan.helpers ?? [];
+  if (!Array.isArray(helpers) || helpers.some((h) => Object.keys(h ?? {}).some((k) => !HELPER_KEYS.has(k)))) return ["手伝う人の形が正しくありません"];
+  if ("gaps" in payload && payload.gaps !== null && !(Array.isArray(payload.gaps) && payload.gaps.every((g) => /^[月火水木金土日]$/.test(g)))) return ["曜日の形が正しくありません"];
+  for (const value of strings(payload)) {
+    const kind = personalKind(value);
+    if (kind) return [`${kind}らしいものが入っています`];
+  }
   return [];
 }
 

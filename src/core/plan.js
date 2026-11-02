@@ -57,10 +57,11 @@ export function importRow({ headers, row, mapping, source = "csv" }) {
   const known = [
     { value: identity["self.name"], alias: "本人" },
     { value: identity["self.kana"], alias: "本人" },
+    { value: identity["self.address"], alias: "自宅", kind: "address" },
     { value: identity["emergency.name"], alias: "緊急連絡先" },
   ];
 
-  if (raw["care.level"]) setField(plan, "care.level", normalizeText(raw["care.level"]), source);
+  if (raw["care.level"]) setField(plan, "care.level", redact(raw["care.level"], known), source);
   if (raw["care.weekly"]) setField(plan, "care.weekly", parseWeekly(raw["care.weekly"]), source);
   for (const path of TEXT_FIELDS) {
     if (raw[path]) setField(plan, path, redact(raw[path], known), source);
@@ -82,7 +83,7 @@ export function planForClaude(plan) {
   return copy;
 }
 
-// 書き取りの結果を計画に入れる。人が直した欄は上書きせず、尋ねるために返す
+// 書き取りの結果を計画に入れる。人が直した欄と CSV から来た欄は上書きせず、尋ねるために返す
 export function applyUpdates(plan, updates, memoId) {
   const conflicts = [];
   for (const { path, value } of updates) {
@@ -96,7 +97,7 @@ export function applyUpdates(plan, updates, memoId) {
     }
     const target = getAt(plan, path);
     if (!target || !("status" in target)) continue;
-    if (target.source === "human") {
+    if (target.source === "human" || target.source === "csv") {
       if (target.value !== value) conflicts.push({ path, current: target.value, proposed: value, memoId });
       continue;
     }

@@ -114,10 +114,11 @@ textarea, .plan-input { width: 100%; font: inherit; padding: 6px 8px; border: 1p
 .sheet-notes p { margin: 2px 0; }
 
 @media print {
+  /* 本人の1枚だけを残す。隠すだけだと場所が残り、白紙のページが増える */
   body { background: #fff; }
-  body * { visibility: hidden; }
-  #sheet, #sheet * { visibility: visible; }
-  #sheet { position: absolute; left: 0; top: 0; width: 100%; border: 0; }
+  body *:not(:has(#sheet)):not(#sheet):not(#sheet *) { display: none; }
+  main, .panel, section { margin: 0; padding: 0; border: 0; box-shadow: none; }
+  #sheet { width: 100%; border: 0; }
 }
 
 @media (max-width: 700px) {

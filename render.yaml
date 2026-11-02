@@ -6,13 +6,17 @@ services:
     region: singapore
     branch: main
     autoDeploy: true
-    buildCommand: "true"
+    buildCommand: npm ci --omit=dev
     startCommand: node server.mjs
     healthCheckPath: /healthz
     envVars:
       - key: HOST
         value: 0.0.0.0
+      - key: PUBLIC_DEMO
+        value: "1"
       - key: NODE_VERSION
         value: "22"
       - key: APP_PASSWORD
+        sync: false
+      - key: ANTHROPIC_API_KEY
         sync: false
