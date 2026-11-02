@@ -6,9 +6,18 @@ import { fileURLToPath } from "node:url";
 import { validateCheckPayload, validateColumnsPayload, validateScribePayload } from "./src/server/validate.js";
 import { mockReadColumns } from "./src/server/mock-reader.js";
 import { mockCheck, mockScribe } from "./src/server/mock-talk.js";
+import { isAuthorized, SECURITY_HEADERS, startupProblem } from "./src/server/auth.js";
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
 const PORT = Number(process.env.PORT ?? 5177);
+const HOST = process.env.HOST ?? "127.0.0.1";
+const PASSWORD = process.env.APP_PASSWORD ?? "";
+
+const problem = startupProblem({ host: HOST, password: PASSWORD });
+if (problem) {
+  console.error(problem);
+  process.exit(1);
+}
 const MAX_BODY = 64 * 1024;
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".csv": "text/csv" };
 
@@ -23,7 +32,13 @@ function resolveStatic(pathname) {
   const path = pathname === "/" ? "/index.html" : pathname;
   const mount = MOUNTS.find(([prefix]) => path.startsWith(prefix));
   if (!mount) return null;
-  const file = normalize(join(mount[1], decodeURIComponent(path.slice(mount[0].length))));
+  let relative;
+  try {
+    relative = decodeURIComponent(path.slice(mount[0].length));
+  } catch {
+    return null;
+  }
+  const file = normalize(join(mount[1], relative));
   return file.startsWith(mount[1] + sep) ? file : null;
 }
 
@@ -73,7 +88,16 @@ async function handleApi(req, res, route) {
 }
 
 const server = createServer(async (req, res) => {
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
   const { pathname } = new URL(req.url, "http://localhost");
+  if (req.method === "GET" && pathname === "/healthz") {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    return res.end("ok");
+  }
+  if (!isAuthorized(req.headers.authorization, PASSWORD)) {
+    res.writeHead(401, { "WWW-Authenticate": 'Basic realm="demo", charset="UTF-8"', "Content-Type": "text/plain; charset=utf-8" });
+    return res.end("パスワードが必要です");
+  }
   if (req.method === "POST" && API[pathname]) return handleApi(req, res, API[pathname]);
   if (req.method !== "GET") return sendJson(res, 405, { errors: ["使えない操作です"] });
   const file = resolveStatic(pathname);
@@ -87,5 +111,5 @@ const server = createServer(async (req, res) => {
   }
 });
 
-// このパソコンの中からだけ開ける
-server.listen(PORT, "127.0.0.1", () => console.log(`http://localhost:${PORT}`));
+// 何も指定しなければ、このパソコンの中からだけ開ける
+server.listen(PORT, HOST, () => console.log(`http://localhost:${server.address().port}`));
