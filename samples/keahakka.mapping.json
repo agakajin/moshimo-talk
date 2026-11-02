@@ -1,0 +1,15 @@
+{
+  "利用者名": "self.name",
+  "ﾌﾘｶﾞﾅ": "self.kana",
+  "生年月日": "self.birth",
+  "性別": "self.gender",
+  "〒": "self.postal",
+  "住所": "self.address",
+  "連絡先": "self.phone",
+  "介護度": "care.level",
+  "週間予定": "care.weekly",
+  "緊急連絡先氏名": "emergency.name",
+  "緊急連絡先TEL": "emergency.phone",
+  "歩行": "care.mobility",
+  "備考": "notes"
+}

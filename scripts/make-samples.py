@@ -1,0 +1,64 @@
+# 架空データのファイルを作る。Shift_JIS と UTF-8 の両方を試すために、文字コードを分けて書き出す
+import json
+from pathlib import Path
+
+SAMPLES = Path(__file__).resolve().parent.parent / "samples"
+SAMPLES.mkdir(exist_ok=True)
+
+okano = [
+    ["利用者名", "ﾌﾘｶﾞﾅ", "生年月日", "性別", "〒", "住所", "連絡先", "介護度", "週間予定", "緊急連絡先氏名", "緊急連絡先TEL", "歩行", "備考"],
+    ["岡野 ハル", "ｵｶﾉ ﾊﾙ", "昭和14年4月12日", "女", "０００－０００１", "ハッカ村字ミドリ　１２０３ー５", "0000-00-1234", "要介護1", "デイサービスはっか 月水金 9:00-16:00", "平井 ユキ", "000-0000-0001", "杖歩行。長距離は車いす", "娘さんはミント市在住"],
+]
+yoshikawa = [
+    ["利用者名", "ﾌﾘｶﾞﾅ", "生年月日", "性別", "住所", "連絡先", "介護度", "週間予定", "備考"],
+    ["𠮷川 正一", "ﾖｼｶﾜ ｼｮｳｲﾁ", "1944/1/7", "男", "ハッカ村字ミナト　２－３－４　村営みなと住宅２０１", "（０００）００００－０００２", "要介護3", "", "𠮷川 誠さん（息子）がミント市"],
+]
+
+
+def to_csv(rows):
+    return "".join(",".join(row) + "\r\n" for row in rows)
+
+
+(SAMPLES / "keahakka_okano.csv").write_bytes(to_csv(okano).encode("cp932"))
+(SAMPLES / "keahakka_yoshikawa.csv").write_bytes(("﻿" + to_csv(yoshikawa)).encode("utf-8"))
+
+mapping = {
+    "利用者名": "self.name",
+    "ﾌﾘｶﾞﾅ": "self.kana",
+    "生年月日": "self.birth",
+    "性別": "self.gender",
+    "〒": "self.postal",
+    "住所": "self.address",
+    "連絡先": "self.phone",
+    "介護度": "care.level",
+    "週間予定": "care.weekly",
+    "緊急連絡先氏名": "emergency.name",
+    "緊急連絡先TEL": "emergency.phone",
+    "歩行": "care.mobility",
+    "備考": "notes",
+}
+
+config = {
+    "name": "ハッカ村",
+    "kana": "はっかそん",
+    "fictional": True,
+    "encoding": "utf-8",
+    "blankValue": "未決定",
+    "evacuationTargetMinutes": 60,
+    "evacuationTargetNote": "デモ用の値。公的な基準ではない",
+    "columns": ["管理番号", "氏名", "ふりがな", "生年月日", "性別", "住所", "電話番号", "携帯電話", "避難場所", "避難支援者1氏名", "避難支援者1続柄", "避難支援者1電話", "避難支援者2氏名", "避難支援者2続柄", "避難支援者2電話", "緊急連絡先1氏名", "緊急連絡先1電話", "避難時の配慮事項", "要介護度", "自宅の災害リスク", "避難方法", "特記事項", "作成日"],
+    "alwaysColumns": ["管理番号", "氏名", "ふりがな", "生年月日", "性別", "住所", "作成日"],
+    "neverColumns": ["特記事項"],
+    "consentGroups": {
+        "contact": {"label": "連絡先", "columns": ["電話番号", "携帯電話", "緊急連絡先1氏名", "緊急連絡先1電話"]},
+        "care": {"label": "歩き方と配慮", "columns": ["避難時の配慮事項", "要介護度"]},
+        "evacuation": {"label": "避難先と段取り", "columns": ["避難場所", "自宅の災害リスク", "避難方法"]},
+        "helper": {"label": "手伝う人", "columns": ["避難支援者1氏名", "避難支援者1続柄", "避難支援者1電話", "避難支援者2氏名", "避難支援者2続柄", "避難支援者2電話"]},
+    },
+    "yardsticks": [
+        {"id": "slope", "label": "坂・階段・狭い道", "look": "手段（車いす・車・送迎）と家のまわりの道が合っているか", "opener": "家の前の階段は、どうやって降りますか？"}
+    ],
+}
+
+for name, data in (("keahakka.mapping.json", mapping), ("hakka-village.config.json", config)):
+    (SAMPLES / name).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
