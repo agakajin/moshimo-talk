@@ -55,6 +55,9 @@ main { max-width: 1040px; margin: 0 auto; padding: 20px 24px 64px; }
 .button:hover { border-color: var(--accent); }
 .button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .button:disabled { opacity: .5; cursor: not-allowed; }
+/* 長押しで文字選択やメニューが出ると、押している間が途切れる */
+.button.mic { min-height: 56px; padding: 12px 20px; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.button.mic.listening { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .button:focus-visible, select:focus-visible, summary:focus-visible { outline: 3px solid #7fb9ad; outline-offset: 2px; }
 
 .scroll { overflow-x: auto; }

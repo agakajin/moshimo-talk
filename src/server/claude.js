@@ -55,9 +55,13 @@ function sharesWords(value, memo) {
   return false;
 }
 const ASKED = /頼ん|頼み|お願いし|引き受/;
-const NOT_ASKED = /頼んでいない|頼んでない|頼んでません|頼めていない|お願いしていない|まだ/;
+const NOT_ASKED = /頼んでいない|頼んでない|頼んでません|頼めていない|お願いしていない|お願いしてない|お願いしてません|頼んでみる|つもり|まだ/;
 // 呼び名は続き柄か位置で書く。分からないものは名前かもしれないので、一般の呼び方にする
-const RELATION = /隣|近所|近く|向かい|同じ|娘|息子|嫁|婿|孫|夫|妻|兄|姉|弟|妹|親|母|父|祖|家族|友|民生|委員|職員|ヘルパー|人|方/;
+const RELATION = /隣|近所|近く|向かい|同じ|娘|息子|嫁|婿|孫|夫|妻|兄|姉|弟|妹|親|母|父|祖|家族|友|知り合い|民生|委員|職員|ヘルパー/;
+const sentenceOf = (quote, memo) => memo.split(/[。！？!?\n]/).find((s) => squeeze(s).includes(squeeze(quote))) ?? "";
+// 答えをまだ聞いていない問いかけは、根拠にしない。文の終わりで見るので、引用から「か」を抜いても通らない
+const QUESTION = /(?:ます|です|でしょう|ません|ない|ある|いる|した)か(?:ね|な)?\s*$/;
+const isAsking = (quote, memo) => QUESTION.test(sentenceOf(quote, memo)) || /[?？]/.test(memo.slice(memo.indexOf(quote) + quote.length, memo.indexOf(quote) + quote.length + 1));
 
 export function acceptColumns(results, columns) {
   const byHeader = new Map(results.map((r) => [r.header, r]));
@@ -73,7 +77,7 @@ export function acceptColumns(results, columns) {
 export function acceptScribe({ updates, helpers }, memo) {
   const accepted = [];
   for (const { path, value, quote } of updates) {
-    if (!SCRIBE_PATHS.includes(path) || !isQuoted(quote, memo) || personalKind(value) || MEDICAL_ORDER.test(value)) continue;
+    if (!SCRIBE_PATHS.includes(path) || !isQuoted(quote, memo) || isAsking(quote, memo) || personalKind(value) || MEDICAL_ORDER.test(value)) continue;
     if (path.endsWith(".noOthers")) {
       if (value === "true" && /ほか|他/.test(quote) && /ない|なし|ません/.test(quote)) accepted.push({ path, value: true });
       continue;
@@ -88,11 +92,15 @@ export function acceptScribe({ updates, helpers }, memo) {
     if (text === "" || (SAME_WORDS.has(path) && !sharesWords(text, memo))) continue;
     accepted.push({ path, value: text });
   }
+  let unnamed = 0;
   for (const { alias, awayWeekdayDaytime, asked, quote } of helpers) {
-    if (!isQuoted(quote, memo) || alias.trim() === "" || personalKind(alias)) continue;
-    // 頼んだかどうかは本人の1枚と CSV に直結するので、メモの言葉で確かめる
-    const reallyAsked = asked === true && ASKED.test(memo) && !NOT_ASKED.test(memo);
-    const name = RELATION.test(alias) ? alias.trim() : "近くの人";
+    if (!isQuoted(quote, memo) || isAsking(quote, memo) || alias.trim() === "" || personalKind(alias)) continue;
+    // 頼んだかどうかは本人の1枚と CSV に直結するので、メモの言葉で確かめる。何人も出る話では、その人の文だけを見る
+    const sentence = sentenceOf(quote, memo);
+    const about = ASKED.test(sentence) || helpers.length > 1 ? sentence : memo;
+    const reallyAsked = asked === true && ASKED.test(about) && !NOT_ASKED.test(about);
+    unnamed += RELATION.test(alias) ? 0 : 1;
+    const name = RELATION.test(alias) ? alias.trim() : unnamed === 1 ? "近くの人" : `近くの人${unnamed}`;
     accepted.push({ path: "helpers.add", value: { alias: name, awayWeekdayDaytime, asked: reallyAsked } });
   }
   return accepted;

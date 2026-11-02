@@ -112,8 +112,9 @@
       <div class="talk-grid">
         <div class="panel">
           <h2>声メモ</h2>
-          <p class="hint">名前は言わず、「娘さん」「隣の人」のように話してください。声はブラウザの音声認識（Google）に送られます。ご本人の声は録りません。</p>
-          <div class="row"><button id="mic" class="button">押して話す</button><span id="micState" class="hint"></span></div>
+          <p class="hint">ご本人の話を聞いたら、確かめるつもりで復唱してください（「裏の部屋でお休みなんですね」）。大きなボタンを長押ししている間だけマイクが動き、その間の声がブラウザの音声認識（Google）に送られます。音は残さず、文字だけを使います。出た文字を確かめて、短く押すと計画に入ります。名前は言わず、「娘さん」「隣の人」のように話してください。</p>
+          <div class="row"><button id="mic" class="button mic" type="button">長押しで復唱／短く押して計画に入れる</button><span id="micState" class="hint" role="status"></span></div>
+          <div id="micKeyRow" class="row" hidden><span class="hint">キーでも同じ操作：<span id="micKey"></span></span><button id="micKeyChange" class="button" type="button">キーを変える</button></div>
           <label for="memo" class="field-label">声メモの文字（その場で直せます）</label>
           <textarea id="memo" rows="3"></textarea>
           <div class="row"><button id="addMemo" class="button primary">計画に入れる</button></div>

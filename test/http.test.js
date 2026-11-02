@@ -49,7 +49,7 @@ test("パスワードなしでは画面もデータも API も開けない。死
   for (const path of ["/", "/app.js", "/core/plan.js", "/samples/keahakka_okano.csv"]) {
     assert.equal((await fetch(base + path)).status, 401, path);
   }
-  const api = await fetch(`${base}/api/check`, { method: "POST", body: "{}" });
+  const api = await fetch(`${base}/api/check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   assert.equal(api.status, 401);
   assert.match(api.headers.get("www-authenticate"), /^Basic/);
 
@@ -68,7 +68,7 @@ test("パスワードなしでは画面もデータも API も開けない。死
   }
   const rejected = await fetch(`${base}/api/read-columns`, {
     method: "POST",
-    headers: auth,
+    headers: { ...auth, "Content-Type": "application/json" },
     body: JSON.stringify({ columns: [{ header: "氏名", withheld: false, samples: ["岡野 ハル"] }] }),
   });
   assert.equal(rejected.status, 422);
@@ -79,7 +79,7 @@ test("公開デモの設定と、回数の上限が効く", async (t) => {
   t.after(() => child.kill());
   const base = `http://127.0.0.1:${await ready}`;
   assert.deepEqual(await (await fetch(`${base}/api/config`)).json(), { publicDemo: true });
-  const post = () => fetch(`${base}/api/check`, { method: "POST", body: JSON.stringify({ plan: {}, gaps: null }) });
+  const post = () => fetch(`${base}/api/check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan: {}, gaps: null }) });
   const first = await post();
   assert.equal(first.status, 500, "形のおかしい計画でもサーバーは落ちない");
   assert.deepEqual(await first.json(), { errors: ["処理に失敗しました"] });
@@ -108,7 +108,7 @@ const message = (answer) => ({
   content: [{ type: "thinking", thinking: "", signature: "x" }, { type: "text", text: JSON.stringify(answer) }],
 });
 const COLUMNS = { columns: [{ header: "氏名", withheld: false, samples: ["文字列1"] }] };
-const postColumns = (base) => fetch(`${base}/api/read-columns`, { method: "POST", body: JSON.stringify(COLUMNS) });
+const postColumns = (base) => fetch(`${base}/api/read-columns`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(COLUMNS) });
 
 test("鍵があれば部品を通して Claude を呼び、mode で分かる", async (t) => {
   const api = await fakeAnthropic(() => ({ status: 200, json: message({ results: [{ header: "氏名", target: "self.name", confidence: "high" }] }) }));
@@ -153,10 +153,10 @@ test("公開デモでは、サーバーでもサンプル以外の列を断り�
   const { child, ready } = run({ HOST: "127.0.0.1", APP_PASSWORD: "", PUBLIC_DEMO: "1" });
   t.after(() => child.kill());
   const base = `http://127.0.0.1:${await ready}`;
-  const send = (columns) => fetch(`${base}/api/read-columns`, { method: "POST", body: JSON.stringify({ columns }) });
+  const send = (columns) => fetch(`${base}/api/read-columns`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ columns }) });
   assert.equal((await send([{ header: "利用者名", withheld: false, samples: ["文字列1"] }])).status, 200);
   assert.equal((await send([{ header: "本物の台帳の列", withheld: false, samples: ["文字列1"] }])).status, 422);
-  const long = await fetch(`${base}/api/scribe`, { method: "POST", body: JSON.stringify({ memo: "あ".repeat(1001), plan: {} }) });
+  const long = await fetch(`${base}/api/scribe`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ memo: "あ".repeat(1001), plan: {} }) });
   assert.equal(long.status, 422);
 });
 
@@ -167,4 +167,12 @@ test("1人で1日の上限を使い切ると止まるが、ほかの人は使え
   assert.equal(limiter.check("a").ok, true);
   assert.equal(limiter.check("a").ok, false);
   assert.equal(limiter.check("b").ok, true);
+});
+
+test("JSON でない送信は、よそのページからのものとして断る", async (t) => {
+  const { child, ready } = run({ HOST: "127.0.0.1", APP_PASSWORD: "" });
+  t.after(() => child.kill());
+  const base = `http://127.0.0.1:${await ready}`;
+  const res = await fetch(`${base}/api/check`, { method: "POST", headers: { "Content-Type": "text/plain" }, body: "{}" });
+  assert.equal(res.status, 415);
 });

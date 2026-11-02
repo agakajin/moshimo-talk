@@ -146,6 +146,8 @@ const server = createServer(async (req, res) => {
   }
   if (req.method === "GET" && pathname === "/api/config") return sendJson(res, 200, { publicDemo: PUBLIC_DEMO });
   if (req.method === "POST" && API[pathname]) {
+    // よそのページから回数と費用を使わせない。送れる形を JSON に限ると、ブラウザが先に確かめる
+    if (!/^application\/json\b/i.test(req.headers["content-type"] ?? "")) return sendJson(res, 415, { errors: ["使えない操作です"] });
     // 手前の値は名乗り放題なので、置き場のプロキシが最後に足した値を使う
     const client = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress).split(",").at(-1).trim();
     const limit = limiter.check(client);

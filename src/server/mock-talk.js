@@ -6,7 +6,7 @@ export function mockScribe(memo) {
   const set = (path, value) => updates.push({ path, value });
   if (/崖|土砂/.test(memo)) set("hazards.items", "土砂");
   if (/津波/.test(memo)) set("hazards.items", "津波");
-  const bedroom = memo.match(/([^。、]*の部屋)で寝ている/);
+  const bedroom = memo.match(/([^。、]*の部屋)で(?:寝|お?休)/);
   if (bedroom) set("home.bedroom", bedroom[1]);
   if (/火.?木/.test(memo)) set("home.aloneHours", "火・木の日中");
   if (/ほかの災害は心配していない/.test(memo)) set("hazards.noOthers", true);

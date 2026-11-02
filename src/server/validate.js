@@ -37,10 +37,33 @@ const MAX_MEMO = 1000;
 const PLAN_KEYS = new Set(Object.keys(createPlan()));
 const HELPER_KEYS = new Set(["alias", "asked", "awayWeekdayDaytime", "memoId"]);
 
+// 値だけでなく、項目の名前と数字も調べる。1字ずつの配列はつなげて見る
 function strings(node, out = []) {
   if (typeof node === "string") out.push(node);
-  else if (node !== null && typeof node === "object") Object.values(node).forEach((v) => strings(v, out));
+  else if (typeof node === "number") out.push(String(node));
+  else if (Array.isArray(node)) {
+    if (node.length > 1 && node.every((v) => typeof v === "string" && v.length === 1)) out.push(node.join(""));
+    node.forEach((v) => strings(v, out));
+  } else if (node !== null && typeof node === "object") {
+    for (const [k, v] of Object.entries(node)) {
+      out.push(k);
+      strings(v, out);
+    }
+  }
   return out;
+}
+
+// 計画の値は文字なので、大きな数字は番号を形の検査から外そうとしたものと見る
+const hasBigNumber = (node) => (typeof node === "number" ? Math.abs(node) >= 1e6 : node !== null && typeof node === "object" && Object.values(node).some(hasBigNumber));
+
+// 計画の形にない項目は Claude まで届いてしまうので、入口で断る
+function hasUnknownKeys(plan) {
+  const shape = createPlan();
+  return Object.entries(plan).some(([section, value]) => {
+    const sample = shape[section];
+    if (value === null || typeof value !== "object" || Array.isArray(value) || sample === null || typeof sample !== "object" || Array.isArray(sample) || "status" in sample) return false;
+    return Object.keys(value).some((k) => !(k in sample));
+  });
 }
 
 function checkPlanPayload(payload, allowed) {
@@ -51,6 +74,8 @@ function checkPlanPayload(payload, allowed) {
   const text = JSON.stringify(payload);
   if (text.length > LIMIT) return ["内容が長すぎます"];
   if (Object.keys(payload.plan).some((k) => !PLAN_KEYS.has(k))) return ["計画に決まった項目以外が入っています"];
+  if (hasUnknownKeys(payload.plan)) return ["計画に決まった項目以外が入っています"];
+  if (hasBigNumber(payload.plan)) return ["番号らしいものが入っています"];
   const helpers = payload.plan.helpers ?? [];
   if (!Array.isArray(helpers) || helpers.some((h) => Object.keys(h ?? {}).some((k) => !HELPER_KEYS.has(k)))) return ["手伝う人の形が正しくありません"];
   if ("gaps" in payload && payload.gaps !== null && !(Array.isArray(payload.gaps) && payload.gaps.every((g) => /^[月火水木金土日]$/.test(g)))) return ["曜日の形が正しくありません"];

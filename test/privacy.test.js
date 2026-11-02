@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { fileURLToPath } from "node:url";
 import { maskTable } from "../src/core/mask.js";
-import { applyUpdates, createPlan, importRow } from "../src/core/plan.js";
+import { applyUpdates, createPlan, importRow, planForClaude } from "../src/core/plan.js";
 import { buildVillageRow, toCsvText, totalMinutes } from "../src/core/output.js";
 import { findLeaks, personalKind, redact, redactDeep } from "../src/core/redact.js";
 import { validateCheckPayload, validateColumnsPayload, validateScribePayload } from "../src/server/validate.js";
@@ -96,12 +96,15 @@ test("見出しの無い CSV や、見出しに混ざった値を止める", () 
   assert.deepEqual(validateColumnsPayload(normal.payload), []);
 });
 
-test("CSV の文の列も住所を伏せ、どの列も伏せ字を通す", () => {
+test("CSV の文の列は計画に元のまま残し、送る前に住所と名前を置き換える", () => {
   const headers = ["氏名", "住所", "危険", "介護度"];
   const row = ["山田 花子", "ハッカ村字川5-3", "字川5番地3の裏は崖", "山田 花子"];
   const { plan } = importRow({ headers, row, mapping: { 氏名: "self.name", 住所: "self.address", 危険: "home.hazardNote", 介護度: "care.level" } });
-  assert.ok(!/字川|5番地/.test(plan.home.hazardNote.value));
-  assert.ok(!/山田/.test(plan.care.level.value));
+  assert.equal(plan.home.hazardNote.value, "字川5番地3の裏は崖");
+  const known = [{ value: "山田 花子", alias: "本人" }, { value: "ハッカ村字川5-3", alias: "自宅", kind: "address" }];
+  const sent = JSON.stringify(redactDeep(planForClaude(plan), known));
+  assert.ok(!/字川|5番地/.test(sent), sent);
+  assert.ok(!/山田/.test(sent), sent);
 });
 
 test("書き取り：値がメモと結びつかなければ捨てる", () => {

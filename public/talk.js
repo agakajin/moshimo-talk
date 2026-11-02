@@ -2,6 +2,7 @@
 import { applyUpdates, editField, planForClaude, serviceGaps } from "/core/plan.js";
 import { findLeaks, redact, redactDeep } from "/core/redact.js";
 import { nextTopic, REQUEST_NOTE } from "/core/talk.js";
+import { chooseKey, createPushToTalk, DEFAULT_KEY, keyCode, keyLabel, keyTriggers } from "/core/voice.js";
 import { createLatest, createQueue } from "/core/work.js";
 import { startWrap } from "/wrap.js";
 
@@ -82,7 +83,7 @@ export function startTalk(state, { script = null } = {}) {
     { value: identity["emergency.phone"], alias: "[電話番号]", kind: "phone" },
   ];
   // 性別は「女」など一般の言葉なので、漏れの検査の対象にしない
-  const secrets = Object.entries(identity).filter(([k]) => k !== "self.gender").map(([, v]) => v).filter(Boolean);
+  const secrets = Object.entries(identity).filter(([k]) => k !== "self.gender").filter(([, v]) => v).map(([k, value]) => (k === "self.address" ? { value, kind: "address" } : value));
   for (const p of state.people) {
     known.unshift({ value: p.name, alias: p.alias });
     secrets.push(p.name);
@@ -239,7 +240,11 @@ export function startTalk(state, { script = null } = {}) {
     renderRequests();
   }
 
+  let micTalk = null;
+
   function addMemo() {
+    // 文字を待っている間に送ると、途中の文が届き、残りがもう一度送られる
+    if (micTalk?.busy()) return;
     $("memoError").hidden = true;
     const raw = $("memo").value;
     if (!raw.trim()) return;
@@ -364,7 +369,8 @@ export function startTalk(state, { script = null } = {}) {
       return;
     }
     state.checkFailed = Boolean(checkError);
-    state.unfinishedMemos = () => $("memos").querySelectorAll(".pending, .failed").length;
+    // 復唱して、計画に入れ忘れた文字も数える
+    state.unfinishedMemos = () => $("memos").querySelectorAll(".pending, .failed").length + ($("memo").value.trim() ? 1 : 0);
     startWrap(state, findings, config);
   });
   $("skip").addEventListener("click", () => {
@@ -382,23 +388,142 @@ export function startTalk(state, { script = null } = {}) {
     renderOpener();
   });
 
+  micTalk = startMic(addMemo);
+}
+
+const MIC_LABEL = "長押しで復唱／短く押して計画に入れる";
+const MIC_ERROR = {
+  "not-allowed": "マイクの使用が許可されていません。ブラウザの設定で許可するか、文字で入れてください。",
+  "service-not-allowed": "マイクの使用が許可されていません。ブラウザの設定で許可するか、文字で入れてください。",
+  "audio-capture": "マイクが見つかりません。文字で入れてください。",
+  network: "音声認識につながりません。文字で入れてください。",
+};
+
+function startMic(addMemo) {
+  const mic = $("mic");
+  const status = $("micState");
   const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
   if (!Recognition) {
-    $("mic").disabled = true;
-    $("micState").textContent = "このブラウザでは声が使えません。文字で入れてください。";
-  } else {
-    let recognition = null;
-    $("mic").addEventListener("click", () => {
-      if (recognition) { recognition.stop(); return; }
-      recognition = new Recognition();
-      recognition.lang = "ja-JP";
-      recognition.interimResults = false;
-      recognition.onresult = (e) => { $("memo").value += [...e.results].map((r) => r[0].transcript).join(""); };
-      recognition.onerror = (e) => { $("micState").textContent = `声を聞き取れませんでした（${e.error}）。`; };
-      recognition.onend = () => { recognition = null; $("mic").textContent = "押して話す"; };
-      $("mic").textContent = "止める";
-      $("micState").textContent = "";
-      recognition.start();
-    });
+    mic.disabled = true;
+    status.textContent = "このブラウザでは声が使えません。文字で入れてください。";
+    return;
   }
+  let before = "";
+  const talk = createPushToTalk({
+    Recognition,
+    onText: (text) => { $("memo").value = before + text; },
+    onInterim: (text) => { if (text) status.textContent = text; },
+    onState: (state, detail) => {
+      mic.classList.toggle("listening", state === "listening");
+      // 文字が届く間は、手で直しても上書きされるので触れないようにする
+      const changing = state === "listening" || state === "finishing";
+      $("memo").readOnly = changing;
+      $("addMemo").disabled = changing;
+      mic.textContent = state === "listening" ? "聞いています（離すと止まります）" : MIC_LABEL;
+      if (state === "listening") status.textContent = "";
+      if (state === "finishing") status.textContent = "文字にしています。";
+      if (state === "idle") status.textContent = $("memo").value.trim() ? "文字を確かめて、短く押すと計画に入ります。" : "聞き取れませんでした。もう一度、長押しで話してください。";
+      if (state === "tap") {
+        status.textContent = $("memo").value.trim() ? "" : "長押ししたまま話してください。";
+        addMemo();
+      }
+      if (state === "error") status.textContent = MIC_ERROR[detail] ?? "声を聞き取れませんでした。文字で入れてください。";
+    },
+  });
+  const press = () => {
+    const held = $("memo").value;
+    // 続けて復唱したとき、前の文とくっつかないようにする
+    if (talk.press()) before = held && !/[。、\s]$/.test(held) ? `${held}。` : held;
+  };
+  const cancel = () => talk.cancel();
+  // 押した指だけを見る。2本目の指で止まったり送られたりしないように
+  let pointer = null;
+  mic.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || pointer !== null) return;
+    pointer = e.pointerId;
+    // 指が少しずれても押したままとして扱う
+    mic.setPointerCapture(e.pointerId);
+    press();
+  });
+  mic.addEventListener("pointerup", (e) => {
+    if (e.pointerId !== pointer) return;
+    pointer = null;
+    // 指を外へずらして離したら、送るつもりではなかったと見る
+    const r = mic.getBoundingClientRect();
+    const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    if (inside) talk.release();
+    else cancel();
+  });
+  mic.addEventListener("pointercancel", (e) => {
+    if (e.pointerId !== pointer) return;
+    pointer = null;
+    cancel();
+  });
+  mic.addEventListener("contextmenu", (e) => e.preventDefault());
+  mic.addEventListener("keydown", (e) => {
+    if ((e.key === " " || e.key === "Enter") && !e.repeat) press();
+    if (e.key === " " || e.key === "Enter") e.preventDefault();
+  });
+  mic.addEventListener("keyup", (e) => { if (e.key === " " || e.key === "Enter") talk.release(); });
+  mic.addEventListener("blur", cancel);
+  startMicKey(talk, press);
+  // 別の画面へ移ったら、押したままにしない
+  document.addEventListener("visibilitychange", () => { if (document.hidden) cancel(); });
+  return talk;
+}
+
+const KEY_STORE = "micKey";
+
+function readKey() {
+  try { return localStorage.getItem(KEY_STORE) || DEFAULT_KEY; } catch { return DEFAULT_KEY; }
+}
+
+function saveKey(code) {
+  try { localStorage.setItem(KEY_STORE, code); } catch { /* 保存できなくても、開いている間は効く */ }
+}
+
+// 足で踏むスイッチなど、手を空けたいときのために録音のキーを選べるようにする。残すのはキーの名前だけ
+function startMicKey(talk, press) {
+  const change = $("micKeyChange");
+  let bound = readKey();
+  let choosing = false;
+  const show = () => {
+    $("micKey").textContent = choosing ? "押してください（Esc で取り消し）" : keyLabel(bound);
+    change.hidden = choosing;
+  };
+  const typing = (target) => Boolean(target.closest?.("input, textarea, select, [contenteditable]"));
+  $("micKeyRow").hidden = false;
+  show();
+  change.addEventListener("click", () => {
+    choosing = true;
+    change.blur();
+    show();
+  });
+  window.addEventListener("keydown", (e) => {
+    if (choosing) {
+      e.preventDefault();
+      e.stopPropagation();
+      const code = chooseKey(e);
+      if (code) {
+        bound = code;
+        saveKey(code);
+      }
+      if (code || e.key === "Escape") {
+        choosing = false;
+        show();
+      }
+      return;
+    }
+    // Ctrl+C などは、そのままブラウザの操作に任せる
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if ($("talk").hidden || !keyTriggers(keyCode(e), bound, typing(e.target))) return;
+    e.preventDefault();
+    if (!e.repeat) press();
+  }, true);
+  window.addEventListener("keyup", (e) => {
+    if ($("talk").hidden || keyCode(e) !== bound) return;
+    talk.release();
+  }, true);
+  // 押したまま別の窓へ移ると、離したことが届かない
+  window.addEventListener("blur", () => talk.cancel());
 }

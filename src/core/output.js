@@ -24,12 +24,26 @@ export function totalMinutes(plan) {
   return move === null || prep === null ? null : prep + move;
 }
 
+const WAITING = "（手伝う人の同意待ち）";
+const PERSON_WORD = /隣|近所|向かい|親子|娘|息子|嫁|婿|孫|夫|妻|兄|姉|弟|妹|親戚|友人|知人|民生委員/;
+// 同意がないときは、手伝う人に触れた文を市向けに出さない
+function withoutHelpers(text, plan) {
+  const aliases = plan.helpers.map((h) => h.alias).filter(Boolean);
+  const mentions = (part) => PERSON_WORD.test(part) || aliases.some((a) => part.includes(a));
+  if (!mentions(text)) return text;
+  const kept = text.split(/(?<=[。；、])/).filter((part) => !mentions(part)).join("").replace(/[、；]$/, "");
+  return kept ? `${kept}${WAITING}` : WAITING;
+}
+
 export function evacuationSentence(plan, whoLabel) {
   const means = val(plan.evacuation.means);
   const minutes = totalMinutes(plan);
   if (!means || minutes === null) return "";
   // null は「誰と」を出さないとき（手伝う人の同意がない）
-  if (whoLabel === null) return `${means}で、準備を入れて${minutes}分`;
+  if (whoLabel === null) {
+    const shown = withoutHelpers(means, plan);
+    return shown === means ? `${means}で、準備を入れて${minutes}分` : `手段は${WAITING}。準備を入れて${minutes}分`;
+  }
   return `${whoLabel || "（誰と行くかは未決定）"}${whoLabel ? "と" : "。"}${means}で、準備を入れて${minutes}分`;
 }
 
@@ -97,7 +111,8 @@ export function buildVillageRow({ plan, identity, people = [], config, createdOn
     return { name: person?.name ?? "", relation: h?.alias ?? "", phone: formatPhone(person?.phone) };
   };
   const [h1, h2] = [helper(0), helper(1)];
-  const considerations = [val(plan.care.mobility), val(plan.considerations.items)].filter(Boolean).join("；");
+  const items = val(plan.considerations.items);
+  const considerations = [val(plan.care.mobility), items && plan.consent.helper !== "yes" ? withoutHelpers(items, plan) : items].filter(Boolean).join("；");
   const values = {
     管理番号: serial,
     氏名: identity["self.name"] ?? "",

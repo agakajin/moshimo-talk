@@ -1,7 +1,6 @@
 // 計画のデータの形。本人を特定する情報は identity に分け、Claude に渡さない
 import { normalizeAddress, normalizeDate, normalizeKana, normalizeName, normalizePhone, normalizePostal, normalizeText } from "./normalize.js";
 import { parseWeekly, weekdaysWithoutService } from "./schedule.js";
-import { redact } from "./redact.js";
 
 export const field = () => ({ value: null, status: "undecided", source: null, memoId: null });
 
@@ -54,17 +53,11 @@ export function importRow({ headers, row, mapping, source = "csv" }) {
   for (const [key, normalize] of Object.entries(IDENTITY)) {
     if (raw[key]) identity[key] = normalize(raw[key]);
   }
-  const known = [
-    { value: identity["self.name"], alias: "本人" },
-    { value: identity["self.kana"], alias: "本人" },
-    { value: identity["self.address"], alias: "自宅", kind: "address" },
-    { value: identity["emergency.name"], alias: "緊急連絡先" },
-  ];
-
-  if (raw["care.level"]) setField(plan, "care.level", redact(raw["care.level"], known), source);
+  // 計画には元の言葉を残す。手元の画面と市向けの出力に使うため。置き換えるのは送る直前だけ
+  if (raw["care.level"]) setField(plan, "care.level", raw["care.level"], source);
   if (raw["care.weekly"]) setField(plan, "care.weekly", parseWeekly(raw["care.weekly"]), source);
   for (const path of TEXT_FIELDS) {
-    if (raw[path]) setField(plan, path, redact(raw[path], known), source);
+    if (raw[path]) setField(plan, path, raw[path], source);
   }
 
   return { identity, plan, notes: raw.notes ?? "", people: [] };
