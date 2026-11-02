@@ -118,7 +118,6 @@ test("書き取り：メモに根拠の無い書き込みは捨てる", () => {
     { path: "evacuation.place", value: "公民館" },
     { path: "evacuation.moveMinutes", value: "30" },
     { path: "hazards.noOthers", value: true },
-    { path: "helpers.add", value: { alias: "隣の人", awayWeekdayDaytime: false, asked: false } },
   ]);
 });
 

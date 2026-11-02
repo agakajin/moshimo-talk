@@ -99,10 +99,22 @@ dd { margin: 0; }
 .gap-top { margin-top: 18px !important; }
 .field-label { display: block; margin-top: 12px; font-size: 13px; color: var(--muted); }
 textarea, .plan-input { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--paper); }
-.plan-row { display: grid; grid-template-columns: 7em minmax(0, 1fr) 5em; gap: 8px; align-items: center; padding: 3px 0; font-size: 14px; }
+.plan-row { display: grid; grid-template-columns: 7em minmax(0, 1fr) 8.5em; gap: 8px; align-items: center; padding: 3px 6px; font-size: 14px; border-radius: 6px; }
 .plan-row .name { color: var(--muted); }
 .plan-row .source { font-size: 12px; color: var(--muted); }
 .plan-row.undecided .plan-input { background: var(--ground); }
+.plan-row .source { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.plan-row .mini { padding: 1px 8px; font-size: 13px; }
+.plan-row.fresh { background: var(--warn-soft); box-shadow: inset 4px 0 0 #d98a1f; }
+.plan-row.fresh .source { color: var(--warn); font-weight: 600; }
+.plan-row.moving { background: var(--warn-soft); outline: 2px solid #d98a1f; }
+.plan-row.target { cursor: pointer; }
+.plan-row.target:hover { background: var(--accent-soft); }
+.move-bar { background: var(--warn-soft); color: var(--warn); padding: 6px 12px; border-radius: 8px; font-size: 14px; margin-bottom: 6px; }
+.plan-helper .who { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.plan-helper label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+#memos .placed { display: block; color: var(--warn); }
+td.waiting { background: var(--warn-soft); color: var(--warn); }
 #memos { font-size: 14px; padding-left: 20px; margin: 12px 0 0; }
 .request { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; cursor: pointer; }
 .request.chosen { background: var(--accent-soft); border-color: var(--accent); }
@@ -129,7 +141,7 @@ textarea, .plan-input { width: 100%; font: inherit; padding: 6px 8px; border: 1p
 }
 
 @media (max-width: 700px) {
-  .talk-grid { grid-template-columns: 1fr; }
+  .talk-grid { grid-template-columns: minmax(0, 1fr); }
   main { padding: 12px 16px 48px; }
   .panel { padding: 16px; }
   .columns { grid-template-columns: 1fr; }

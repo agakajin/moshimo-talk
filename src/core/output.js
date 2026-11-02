@@ -25,23 +25,26 @@ export function totalMinutes(plan) {
 }
 
 const WAITING = "（手伝う人の同意待ち）";
-const PERSON_WORD = /隣|近所|向かい|親子|娘|息子|嫁|婿|孫|夫|妻|兄|姉|弟|妹|親戚|友人|知人|民生委員/;
-// 同意がないときは、手伝う人に触れた文を市向けに出さない
-function withoutHelpers(text, plan) {
-  const aliases = plan.helpers.map((h) => h.alias).filter(Boolean);
-  const mentions = (part) => PERSON_WORD.test(part) || aliases.some((a) => part.includes(a));
+const PERSON_WORD = /隣|近所|近くの人|向かい|親子|娘|むすめ|息子|嫁|婿|孫|(?<![丈工農])夫|妻|兄|姉|弟|妹|母(?!屋)|父|親|甥|姪|いとこ|おじ|おば|じいちゃん|ばあちゃん|長男|次男|三男|長女|次女|三女|主人|旦那|家内|家族|友人|友達|友だち|知人|知り合い|区長|会長|班長|組長|民生委員|ヘルパー|ケアマネ|看護師|大家|消防団|先生|(?<!たく)さん|様(?!子)/;
+// 人の話に見えるが、場所や体の話の言葉は先に外す。避難先を隠さないため
+const NOT_PERSON = /(?:隣|近所|向かい)の?(?:町|村|市|区|部屋|公民館|小学校|中学校|集会所|体育館|神社|寺|公園|病院)|親水|親指|親切|親しい|模様|同様|様々/g;
+// 同意がないときは、手伝う人に触れた文を市向けに出さない。言葉の一覧には限りがあるので、画面でも人が確かめる
+function withoutHelpers(text, plan, people = []) {
+  // 名字だけや空白なしで書いても見つける
+  const names = [...plan.helpers.map((h) => h.alias), ...people.flatMap((p) => [p.alias, p.name, String(p.name ?? "").replace(/\s/g, ""), ...String(p.name ?? "").split(/\s+/)])].filter(Boolean);
+  const mentions = (part) => PERSON_WORD.test(part.replace(NOT_PERSON, "")) || names.some((a) => part.includes(a));
   if (!mentions(text)) return text;
   const kept = text.split(/(?<=[。；、])/).filter((part) => !mentions(part)).join("").replace(/[、；]$/, "");
   return kept ? `${kept}${WAITING}` : WAITING;
 }
 
-export function evacuationSentence(plan, whoLabel) {
+export function evacuationSentence(plan, whoLabel, people = []) {
   const means = val(plan.evacuation.means);
   const minutes = totalMinutes(plan);
   if (!means || minutes === null) return "";
   // null は「誰と」を出さないとき（手伝う人の同意がない）
   if (whoLabel === null) {
-    const shown = withoutHelpers(means, plan);
+    const shown = withoutHelpers(means, plan, people);
     return shown === means ? `${means}で、準備を入れて${minutes}分` : `手段は${WAITING}。準備を入れて${minutes}分`;
   }
   return `${whoLabel || "（誰と行くかは未決定）"}${whoLabel ? "と" : "。"}${means}で、準備を入れて${minutes}分`;
@@ -111,8 +114,8 @@ export function buildVillageRow({ plan, identity, people = [], config, createdOn
     return { name: person?.name ?? "", relation: h?.alias ?? "", phone: formatPhone(person?.phone) };
   };
   const [h1, h2] = [helper(0), helper(1)];
-  const items = val(plan.considerations.items);
-  const considerations = [val(plan.care.mobility), items && plan.consent.helper !== "yes" ? withoutHelpers(items, plan) : items].filter(Boolean).join("；");
+  const open = (f) => (val(f) && plan.consent.helper !== "yes" ? withoutHelpers(val(f), plan, people) : val(f));
+  const considerations = [open(plan.care.mobility), open(plan.considerations.items)].filter(Boolean).join("；");
   const values = {
     管理番号: serial,
     氏名: identity["self.name"] ?? "",
@@ -120,13 +123,13 @@ export function buildVillageRow({ plan, identity, people = [], config, createdOn
     生年月日: identity["self.birth"] ?? "",
     性別: identity["self.gender"] ?? "",
     住所: identity["self.address"] ?? "",
-    自治会名: val(plan.home.community),
-    普段いる部屋: val(plan.home.usualRoom),
-    寝室の場所: val(plan.home.bedroom),
-    ひとりになる時間帯: val(plan.home.aloneHours),
+    自治会名: open(plan.home.community),
+    普段いる部屋: open(plan.home.usualRoom),
+    寝室の場所: open(plan.home.bedroom),
+    ひとりになる時間帯: open(plan.home.aloneHours),
     電話番号: formatPhone(identity["self.phone"]),
     携帯電話: "",
-    避難場所: val(plan.evacuation.place),
+    避難場所: open(plan.evacuation.place),
     避難支援者1氏名: h1.name,
     避難支援者1続柄: h1.relation,
     避難支援者1電話: h1.phone,
@@ -137,8 +140,8 @@ export function buildVillageRow({ plan, identity, people = [], config, createdOn
     緊急連絡先1電話: formatPhone(identity["emergency.phone"]),
     避難時の配慮事項: considerations,
     要介護度: val(plan.care.level),
-    自宅の災害リスク: val(plan.hazards.items),
-    避難方法: evacuationSentence(plan, plan.consent.helper === "yes" ? h1.relation : null),
+    自宅の災害リスク: open(plan.hazards.items),
+    避難方法: evacuationSentence(plan, plan.consent.helper === "yes" ? h1.relation : null, people),
     特記事項: "",
     作成日: createdOn,
   };

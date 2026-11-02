@@ -1,5 +1,5 @@
 // 計画のデータの形。本人を特定する情報は identity に分け、Claude に渡さない
-import { normalizeAddress, normalizeDate, normalizeKana, normalizeName, normalizePhone, normalizePostal, normalizeText } from "./normalize.js";
+import { normalizeAddress, normalizeDate, normalizeKana, normalizeName, normalizePhone, normalizePostal, normalizeText, parseMinutes } from "./normalize.js";
 import { parseWeekly, weekdaysWithoutService } from "./schedule.js";
 
 export const field = () => ({ value: null, status: "undecided", source: null, memoId: null });
@@ -82,11 +82,15 @@ export function applyUpdates(plan, updates, memoId, { late = false } = {}) {
   const conflicts = [];
   for (const { path, value } of updates) {
     if (path === "helpers.add") {
+      const { declined, ...helper } = value;
       const known = plan.helpers.find((h) => h.alias === value.alias);
-      if (!known) plan.helpers.push({ ...value, memoId });
+      if (!known) plan.helpers.push({ ...helper, memoId });
       else {
-        // あとから「頼んだ」と聞いたら直す
-        if (value.asked) known.asked = true;
+        // あとから「頼んだ」「断られた」と聞いたら直す。人が決めたものは変えない
+        if (known.askedBy !== "human") {
+          if (value.asked) known.asked = true;
+          if (declined) known.asked = false;
+        }
         if (value.awayWeekdayDaytime) known.awayWeekdayDaytime = true;
       }
       continue;
@@ -112,6 +116,35 @@ export function editField(plan, path, value) {
   Object.assign(target, text === ""
     ? { value: null, status: "undecided", source: null, memoId: null }
     : { value: text, status: "filled", source: "human", memoId: null });
+}
+
+// 声メモが実際に入れた欄と、入る前の中身を返す。「移す」で元に戻すために使う
+export function fieldsBefore(plan, updates) {
+  return new Map(updates
+    .filter(({ path }) => path !== "helpers.add" && !path.endsWith(".noOthers") && getAt(plan, path) && "status" in getAt(plan, path))
+    .map(({ path }) => [path, { ...getAt(plan, path) }]));
+}
+
+export function placedFields(plan, before, memoId) {
+  return new Map([...before].filter(([path]) => {
+    const f = getAt(plan, path);
+    return f.source === "voice" && f.memoId === memoId;
+  }));
+}
+
+// 入れ間違いを人が別の欄へ移す。元の欄は入る前に戻し、行き先に別の値があれば overwrite のときだけ変える
+export function moveField(plan, from, to, { previous = null, overwrite = false } = {}) {
+  const source = getAt(plan, from);
+  const target = getAt(plan, to);
+  const value = source.value;
+  if (from === to || source.status !== "filled") return { moved: false, reason: "empty" };
+  if (to.endsWith("Minutes") && parseMinutes(value) === null) return { moved: false, reason: "minutes" };
+  if (target.status === "filled" && target.value !== value && !overwrite) return { moved: false, reason: "occupied", current: target.value };
+  const replaced = { ...target };
+  // 同じ話を2回入れていたときは、前の値も入れ間違いなので空に戻す
+  Object.assign(source, previous && previous.value !== value ? previous : { value: null, status: "undecided", source: null, memoId: null });
+  Object.assign(target, { value, status: "filled", source: "human", memoId: null });
+  return { moved: true, replaced };
 }
 
 // 続き用ファイル。本人を特定する情報を含むので、書き出した人の責任で扱う

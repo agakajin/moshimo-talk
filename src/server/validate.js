@@ -35,7 +35,7 @@ export function validateColumnsPayload(payload) {
 const LIMIT = 8000;
 const MAX_MEMO = 1000;
 const PLAN_KEYS = new Set(Object.keys(createPlan()));
-const HELPER_KEYS = new Set(["alias", "asked", "awayWeekdayDaytime", "memoId"]);
+const HELPER_KEYS = new Set(["alias", "asked", "askedBy", "awayWeekdayDaytime", "memoId"]);
 
 // 値だけでなく、項目の名前と数字も調べる。1字ずつの配列はつなげて見る
 function strings(node, out = []) {

@@ -82,7 +82,7 @@ export function startWrap(state, findings, config) {
     if (!allowed) { $("csvPreview").replaceChildren(); return; }
     const row = csvRow();
     $("csvPreview").replaceChildren(...config.columns.map((c, i) => el("tr", {},
-      el("td", { textContent: c }), el("td", { textContent: row[i] }))));
+      el("td", { textContent: c }), el("td", { textContent: row[i], className: String(row[i]).includes("同意待ち") ? "waiting" : "" }))));
   }
 
   // 帰る前の画面を開いたあとに書き取りが終わることがある

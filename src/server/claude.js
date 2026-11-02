@@ -54,11 +54,19 @@ function sharesWords(value, memo) {
   for (let i = 0; i + 2 <= v.length; i += 1) if (m.includes(v.slice(i, i + 2))) return true;
   return false;
 }
-const ASKED = /頼ん|頼み|お願いし|引き受/;
-const NOT_ASKED = /頼んでいない|頼んでない|頼んでません|頼めていない|お願いしていない|お願いしてない|お願いしてません|頼んでみる|つもり|まだ/;
+// 市に渡す書類に直結するので、頼み終えた言い方だけを見る。希望や予定、返事待ちは入れない
+const ASKED = /頼んだ|頼みました|頼んであ|頼んでい|頼んでます|頼めた|頼めました|お願いした|お願いしました|お願いしてあ|お願いしてい|お願いしてます|引き受けて|引き受けた/;
+// 頼む言葉のあとの否定は、形を問わず頼んでいないと見る
+const NEGATED = /(?:頼|お願い|引き受).*(?:ない|なく|なか|ません|ず)/;
+const NOT_ASKED = /たい|たかった|たら|だら|ほうが|方が|ほしい|欲しい|そう|いいか|迷|けど|けれど|無理|難し|てくれるか|にくい|づらい|頼んでみ|ようと思|つもり|まだ|断られ|断わられ|返事待ち|返事を待|分から|わから/;
+const DECLINED = /断られ|断わられ|引き受けられない/;
 // 呼び名は続き柄か位置で書く。分からないものは名前かもしれないので、一般の呼び方にする
 const RELATION = /隣|近所|近く|向かい|同じ|娘|息子|嫁|婿|孫|夫|妻|兄|姉|弟|妹|親|母|父|祖|家族|友|知り合い|民生|委員|職員|ヘルパー/;
 const sentenceOf = (quote, memo) => memo.split(/[。！？!?\n]/).find((s) => squeeze(s).includes(squeeze(quote))) ?? "";
+// 呼び名の中心の言葉が、根拠の文に出ていること。「娘に頼んだ」を根拠に息子さんを入れない
+const namesPerson = (alias, quote) => squeeze(quote).includes(alias.match(RELATION)?.[0] ?? squeeze(alias));
+// 置き換えの記号のまま計画に入れると、本人の1枚と市向けの CSV に記号が出る
+const PLACEHOLDER = /\[(?:お名前|住所|日付|電話番号|郵便番号)\]/;
 // 答えをまだ聞いていない問いかけは、根拠にしない。文の終わりで見るので、引用から「か」を抜いても通らない
 const QUESTION = /(?:ます|です|でしょう|ません|ない|ある|いる|した)か(?:ね|な)?\s*$/;
 const isAsking = (quote, memo) => QUESTION.test(sentenceOf(quote, memo)) || /[?？]/.test(memo.slice(memo.indexOf(quote) + quote.length, memo.indexOf(quote) + quote.length + 1));
@@ -77,7 +85,7 @@ export function acceptColumns(results, columns) {
 export function acceptScribe({ updates, helpers }, memo) {
   const accepted = [];
   for (const { path, value, quote } of updates) {
-    if (!SCRIBE_PATHS.includes(path) || !isQuoted(quote, memo) || isAsking(quote, memo) || personalKind(value) || MEDICAL_ORDER.test(value)) continue;
+    if (!SCRIBE_PATHS.includes(path) || !isQuoted(quote, memo) || isAsking(quote, memo) || personalKind(value) || PLACEHOLDER.test(value) || MEDICAL_ORDER.test(value)) continue;
     if (path.endsWith(".noOthers")) {
       if (value === "true" && /ほか|他/.test(quote) && /ない|なし|ません/.test(quote)) accepted.push({ path, value: true });
       continue;
@@ -94,14 +102,14 @@ export function acceptScribe({ updates, helpers }, memo) {
   }
   let unnamed = 0;
   for (const { alias, awayWeekdayDaytime, asked, quote } of helpers) {
-    if (!isQuoted(quote, memo) || isAsking(quote, memo) || alias.trim() === "" || personalKind(alias)) continue;
-    // 頼んだかどうかは本人の1枚と CSV に直結するので、メモの言葉で確かめる。何人も出る話では、その人の文だけを見る
+    if (!isQuoted(quote, memo) || isAsking(quote, memo) || alias.trim() === "" || personalKind(alias) || PLACEHOLDER.test(alias) || !namesPerson(alias, quote)) continue;
+    // 頼んだかどうかは本人の1枚と CSV に直結するので、その人の文だけで確かめる
     const sentence = sentenceOf(quote, memo);
-    const about = ASKED.test(sentence) || helpers.length > 1 ? sentence : memo;
-    const reallyAsked = asked === true && ASKED.test(about) && !NOT_ASKED.test(about);
+    const reallyAsked = asked === true && ASKED.test(sentence) && !NOT_ASKED.test(sentence) && !NEGATED.test(sentence);
+    const declined = DECLINED.test(sentence);
     unnamed += RELATION.test(alias) ? 0 : 1;
     const name = RELATION.test(alias) ? alias.trim() : unnamed === 1 ? "近くの人" : `近くの人${unnamed}`;
-    accepted.push({ path: "helpers.add", value: { alias: name, awayWeekdayDaytime, asked: reallyAsked } });
+    accepted.push({ path: "helpers.add", value: { alias: name, awayWeekdayDaytime, asked: reallyAsked, ...(declined ? { declined: true } : {}) } });
   }
   return accepted;
 }

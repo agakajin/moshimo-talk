@@ -1,5 +1,5 @@
 // 訪問の画面。声メモは送る前に伏せ、送る中身をそのまま見せる
-import { applyUpdates, editField, planForClaude, serviceGaps } from "/core/plan.js";
+import { applyUpdates, editField, fieldsBefore, moveField, placedFields, planForClaude, serviceGaps } from "/core/plan.js";
 import { findLeaks, redact, redactDeep } from "/core/redact.js";
 import { nextTopic, REQUEST_NOTE } from "/core/talk.js";
 import { chooseKey, createPushToTalk, DEFAULT_KEY, keyCode, keyLabel, keyTriggers } from "/core/voice.js";
@@ -27,6 +27,7 @@ const FIELDS = [
   ["care.hearing", "聞こえ方"],
   ["care.household", "同居の有無"],
 ];
+const LABEL = new Map(FIELDS);
 const SOURCE = { csv: "CSV から", voice: "声メモから", human: "人が入れた" };
 const WEEK = ["月", "火", "水", "木", "金", "土", "日"];
 
@@ -70,6 +71,14 @@ export function startTalk(state, { script = null } = {}) {
   let memoCount = 0;
   let pendingMemos = 0;
   let checking = false;
+  // 声メモが入れた欄と入る前の中身。この訪問の間はいつでも移せる。計画には残さない
+  const fresh = new Map();
+  // 色を付けるのは、最後に入った欄だけ
+  let latest = new Set();
+  let freshHelpers = new Set();
+  let moving = null;
+  const planRows = new Map();
+  const helperRows = new Map();
   const scribeQueue = createQueue();
   const checker = createLatest(runCheck);
   const refreshFindings = () => (pendingMemos > 0 ? Promise.resolve() : checker.request());
@@ -95,6 +104,7 @@ export function startTalk(state, { script = null } = {}) {
 
   $("talk").hidden = false;
   renderAll();
+  renderPeople();
   refreshFindings();
 
   function renderOpener() {
@@ -121,35 +131,146 @@ export function startTalk(state, { script = null } = {}) {
     $("talkWeek").replaceChildren(el("div", { className: "week-wrap" }, el("div", { className: "week" }, ...days)));
   }
 
-  function renderPlan() {
-    // 答えは入力の途中でも届くので、打っている欄はそのまま残す
-    const active = document.activeElement?.closest?.("#planFields") ? document.activeElement : null;
-    const draft = active && { path: active.dataset.path, value: active.value, at: active.selectionStart };
-    const rows = FIELDS.map(([path, label]) => {
-      const f = getAt(plan, path);
-      const input = el("input", { className: "plan-input", value: f.value ?? "", placeholder: "未決定", ariaLabel: label });
+  function movePlaced(to, options = {}) {
+    const from = moving;
+    const result = moveField(plan, from, to, { previous: fresh.get(from) ?? null, ...options });
+    if (result.reason === "minutes") {
+      $("moveText").textContent = `「${getAt(plan, from).value}」は時間として読めないので、${LABEL.get(to)}には移せません。別の欄を選んでください。`;
+      return;
+    }
+    if (result.reason === "occupied") {
+      moving = null;
+      renderAll();
+      askOverwrite(from, to, result.current);
+      return;
+    }
+    if (!result.moved) return;
+    fresh.delete(from);
+    latest.delete(from);
+    fresh.set(to, result.replaced);
+    latest.add(to);
+    moving = null;
+    renderAll();
+    planRows.get(to).input.focus();
+    refreshFindings();
+  }
+
+  function askOverwrite(from, to, current) {
+    const value = getAt(plan, from).value;
+    const yes = el("button", { className: "button", textContent: "こちらに変える" });
+    const box = el("p", { className: "notice" }, `${LABEL.get(to)}の「${current}」を「${value}」に変えますか？ `, yes);
+    yes.addEventListener("click", () => {
+      // 尋ねている間に欄が変わっていたら、古い話のまま変えない
+      if (getAt(plan, from).value !== value) {
+        box.replaceChildren("元の欄が変わったので、移すのをやめました。");
+        return;
+      }
+      const now = getAt(plan, to).value;
+      box.remove();
+      if (now !== null && now !== current) {
+        askOverwrite(from, to, now);
+        return;
+      }
+      moving = from;
+      movePlaced(to, { overwrite: true });
+    });
+    $("conflicts").append(box);
+    yes.focus();
+  }
+
+  // 欄もボタンも作り直さず中身だけ変える。作り直すと、Tab で移った先や、押している途中のボタンが消える
+  function buildPlanRows() {
+    for (const [path, label] of FIELDS) {
+      const input = el("input", { className: "plan-input", placeholder: "未決定", ariaLabel: label });
       input.dataset.path = path;
       input.addEventListener("change", () => {
         editField(plan, path, input.value);
+        fresh.delete(path);
+        latest.delete(path);
         renderAll();
         refreshFindings();
       });
-      return el("div", { className: `plan-row ${f.status}` },
-        el("span", { className: "name", textContent: label }),
-        input,
-        el("span", { className: "source", textContent: SOURCE[f.source] ?? "" }));
-    });
-    const helpers = plan.helpers.map((h) => el("div", { className: "plan-row filled" },
-      el("span", { className: "name", textContent: "近くの人" }),
-      el("span", { textContent: `${h.alias}${h.awayWeekdayDaytime ? "（平日の昼は不在）" : ""}${h.asked ? "" : "・まだ頼んでいない"}` }),
-      el("span", { className: "source", textContent: "声メモから" })));
-    $("planFields").replaceChildren(...rows, ...helpers);
-    if (draft?.path) {
-      const input = [...$("planFields").querySelectorAll("input")].find((i) => i.dataset.path === draft.path);
-      input.value = draft.value;
-      input.focus();
-      input.setSelectionRange(draft.at, draft.at);
+      // 打っている間に届いた答えは、欄を離れたときに見せる
+      input.addEventListener("blur", () => { input.value = getAt(plan, path).value ?? ""; });
+      const note = el("span");
+      const move = el("button", { className: "button mini", type: "button", textContent: "移す", ariaLabel: `${label}の内容を別の欄へ移す` });
+      move.addEventListener("click", () => {
+        moving = path;
+        renderAll();
+        $("moveCancel").focus();
+      });
+      const here = el("button", { className: "button mini", type: "button", textContent: "ここへ", ariaLabel: `${label}へ移す` });
+      const row = el("div", {}, el("span", { className: "name", textContent: label }), input, el("span", { className: "source" }, note, move, here));
+      // 移している間は、行のどこを押しても行き先になる
+      row.addEventListener("click", () => {
+        if (moving && moving !== path) movePlaced(path);
+      });
+      planRows.set(path, { row, input, note, move, here });
+      $("planFields").append(row);
     }
+  }
+
+  function helperRow(h) {
+    if (helperRows.has(h)) return helperRows.get(h);
+    const asked = el("input", { type: "checkbox" });
+    asked.addEventListener("change", () => {
+      h.asked = asked.checked;
+      h.askedBy = "human";
+      renderPlan();
+      refreshFindings();
+    });
+    const remove = el("button", { className: "button mini", type: "button", textContent: "取り消す", ariaLabel: `${h.alias}を計画から外す` });
+    remove.addEventListener("click", () => {
+      plan.helpers = plan.helpers.filter((x) => x !== h);
+      // 同じ呼び名で別の人を入れ直したとき、前の人の名前を出さない。置き換えのための控えは残す
+      state.people = state.people.filter((p) => p.alias !== h.alias);
+      freshHelpers.delete(h.alias);
+      renderPeople();
+      renderPlan();
+      refreshFindings();
+    });
+    const who = el("span");
+    const note = el("span");
+    const row = el("div", {}, el("span", { className: "name", textContent: "近くの人" }),
+      el("span", { className: "who" }, who, el("label", {}, asked, "頼めた")),
+      el("span", { className: "source" }, note, remove));
+    const parts = { row, asked, who, note };
+    helperRows.set(h, parts);
+    return parts;
+  }
+
+  function renderPeople() {
+    // 名前は画面の中だけ。呼び名で一覧に出す
+    $("people").replaceChildren(...state.people.map((p) => el("li", { textContent: `${p.alias}：入力ずみ` })));
+  }
+
+  function renderPlan() {
+    if (planRows.size === 0) buildPlanRows();
+    for (const [path, { row, input, note, move, here }] of planRows) {
+      const f = getAt(plan, path);
+      const isLatest = latest.has(path);
+      row.className = `plan-row ${f.status}${isLatest ? " fresh" : ""}${moving === path ? " moving" : ""}${moving && moving !== path ? " target" : ""}`;
+      // 打っている欄の文字は消さない。移している間は打っていないので、行き先にも値を見せる
+      if (document.activeElement !== input || input.readOnly) input.value = f.value ?? "";
+      input.readOnly = Boolean(moving);
+      note.textContent = moving === path ? "これを移します" : moving ? "" : isLatest ? (f.source === "human" ? "移しました" : "いま入った") : SOURCE[f.source] ?? "";
+      move.hidden = Boolean(moving) || !fresh.has(path) || f.status !== "filled";
+      here.hidden = !moving || moving === path;
+    }
+    $("moveBar").hidden = !moving;
+    if (moving) $("moveText").textContent = `「${getAt(plan, moving).value}」を、どの欄に移しますか？`;
+    const rows = plan.helpers.map((h) => {
+      const parts = helperRow(h);
+      const isFresh = freshHelpers.has(h.alias);
+      parts.row.className = `plan-row plan-helper filled${isFresh ? " fresh" : ""}`;
+      parts.who.textContent = `${h.alias}${h.awayWeekdayDaytime ? "（平日の昼は不在）" : ""}`;
+      parts.asked.checked = h.asked === true;
+      parts.note.textContent = isFresh ? "いま入った" : "";
+      return parts.row;
+    });
+    // 同じ顔ぶれなら置き直さない。押したチェックからフォーカスが外れないように
+    const box = $("planHelpers");
+    if (rows.length !== box.children.length || rows.some((r, i) => box.children[i] !== r)) box.replaceChildren(...rows);
   }
 
   function renderRequests() {
@@ -274,8 +395,25 @@ export function startTalk(state, { script = null } = {}) {
         const data = await post("/api/scribe", body);
         markMode(data.mode);
         memoCount += 1;
-        appendConflicts(applyUpdates(plan, data.updates, memoCount, { late }));
+        const before = fieldsBefore(plan, data.updates);
+        const conflicts = applyUpdates(plan, data.updates, memoCount, { late });
+        appendConflicts(conflicts);
+        // 移している途中でも、話は続くので操作は止めない。前の欄もあとから移せるよう足していく
+        const placedNow = placedFields(plan, before, memoCount);
+        for (const [path, previous] of placedNow) fresh.set(path, previous);
+        const helpersNow = data.updates.filter((u) => u.path === "helpers.add");
+        if (placedNow.size > 0 || helpersNow.length > 0) {
+          latest = new Set(placedNow.keys());
+          freshHelpers = new Set(helpersNow.map((u) => u.value.alias));
+        }
         item.className = "";
+        const placed = [...placedNow.keys()].map((p) => LABEL.get(p) ?? p);
+        const names = [...placed, ...helpersNow.map((u) => `近くの人（${u.value.alias}）`)];
+        for (const { value } of helpersNow) {
+          if (value.declined && plan.helpers.some((h) => h.alias === value.alias && h.asked)) item.append(el("small", { className: "placed", textContent: `→ ${value.alias}は断られたようです。「頼めた」の印を確かめてください` }));
+        }
+        if (names.length > 0) item.append(el("small", { className: "placed", textContent: `→ ${names.join("、")}に入りました` }));
+        else if (conflicts.length === 0 && !data.updates.some((u) => u.path.endsWith(".noOthers"))) item.append(el("small", { className: "placed", textContent: "→ どの欄にも入りませんでした。文字を確かめるか、欄に直接入れてください" }));
         if (data.dropped > 0) item.append(el("small", { className: "hint", textContent: ` 一部は根拠を確かめられず、計画に入れていません。欄を確かめてください。` }));
         interrupt = null;
       } catch (e) {
@@ -315,6 +453,16 @@ export function startTalk(state, { script = null } = {}) {
   }
 
   $("addMemo").addEventListener("click", addMemo);
+  const cancelMove = () => {
+    const from = moving;
+    moving = null;
+    renderAll();
+    planRows.get(from)?.move.focus();
+  };
+  $("moveCancel").addEventListener("click", cancelMove);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && moving) cancelMove();
+  });
   $("addPerson").addEventListener("click", () => {
     const name = $("personName").value.trim();
     const alias = $("personAlias").value.trim();
@@ -331,13 +479,11 @@ export function startTalk(state, { script = null } = {}) {
       known.push({ value: phone, alias: "[電話番号]", kind: "phone" });
       secrets.push(phone);
     }
-    state.people.push({ name, alias, phone });
-    const helper = plan.helpers.find((h) => h.alias === alias);
-    if (helper) helper.asked = true;
-    else plan.helpers.push({ alias, awayWeekdayDaytime: false, asked: true, memoId: null });
+    state.people = [...state.people.filter((p) => p.alias !== alias), { name, alias, phone }];
+    // 名前を入れただけでは頼んだことにしない。頼めたかどうかは計画の欄で人が印を付ける
+    if (!plan.helpers.some((h) => h.alias === alias)) plan.helpers.push({ alias, awayWeekdayDaytime: false, asked: false, memoId: null });
     renderPlan();
-    // 名前は画面の中だけ。呼び名で一覧に出す
-    $("people").append(el("li", { textContent: `${alias}：入力ずみ` }));
+    renderPeople();
     $("personName").value = "";
     $("personAlias").value = "";
     $("personPhone").value = "";
