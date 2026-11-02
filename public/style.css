@@ -74,14 +74,35 @@ dd { margin: 0; }
 #toTalk { margin: 0; padding-left: 20px; }
 .local { font-size: 12px; color: var(--muted); }
 
-.week { display: grid; grid-template-columns: repeat(7, minmax(72px, 1fr)); gap: 6px; }
-.day { border: 1px solid var(--line); border-radius: 8px; padding: 8px; min-height: 84px; font-size: 13px; }
+.week { display: grid; grid-template-columns: repeat(7, minmax(52px, 1fr)); gap: 4px; }
+.day { border: 1px solid var(--line); border-radius: 8px; padding: 6px; min-height: 84px; font-size: 12px; overflow-wrap: anywhere; }
 .day b { display: block; font-size: 15px; }
 .day.covered { background: var(--accent-soft); border-color: var(--accent-soft); }
 .day.gap { background: var(--warn-soft); border-color: #e7c48f; color: var(--warn); font-weight: 600; }
 .week-wrap { overflow-x: auto; }
 
+.opener { border-color: var(--accent); }
+.label { margin: 0; color: var(--muted); font-size: 13px; }
+.opener.interrupt { background: var(--warn-soft); border-color: #e7c48f; }
+.opener-text { margin: 2px 0 0; font-size: 24px; font-weight: 600; line-height: 1.5; }
+.talk-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; align-items: start; }
+.talk-grid .panel { margin-bottom: 16px; }
+.gap-top { margin-top: 18px !important; }
+.field-label { display: block; margin-top: 12px; font-size: 13px; color: var(--muted); }
+textarea, .plan-input { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--paper); }
+.plan-row { display: grid; grid-template-columns: 7em minmax(0, 1fr) 5em; gap: 8px; align-items: center; padding: 3px 0; font-size: 14px; }
+.plan-row .name { color: var(--muted); }
+.plan-row .source { font-size: 12px; color: var(--muted); }
+.plan-row.undecided .plan-input { background: var(--ground); }
+#memos { font-size: 14px; padding-left: 20px; margin: 12px 0 0; }
+.request { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; cursor: pointer; }
+.request.chosen { background: var(--accent-soft); border-color: var(--accent); }
+.request small { display: block; color: var(--muted); }
+.plan-input.short { width: auto; flex: 1 1 8em; min-width: 0; }
+.people { margin: 8px 0 0; padding-left: 20px; font-size: 14px; }
+
 @media (max-width: 700px) {
+  .talk-grid { grid-template-columns: 1fr; }
   main { padding: 12px 16px 48px; }
   .panel { padding: 16px; }
   .columns { grid-template-columns: 1fr; }

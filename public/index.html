@@ -80,6 +80,52 @@
       <div id="week"></div>
       <div id="checks"></div>
       <p class="hint">計画の欄は、まだこの画面の中にしかありません。閉じると消えます。</p>
+      <div class="row"><button id="startTalk" class="button primary">訪問を始める</button></div>
+    </section>
+
+    <section id="talk" hidden>
+      <div class="panel opener" aria-live="polite">
+        <p id="openerLabel" class="label">話のきっかけ</p>
+        <p id="opener" class="opener-text"></p>
+        <div class="row"><button id="skip" class="button">今は聞けない</button></div>
+      </div>
+      <p id="talkMode" class="notice" hidden></p>
+      <div class="talk-grid">
+        <div class="panel">
+          <h2>声メモ</h2>
+          <p class="hint">名前は言わず、「娘さん」「隣の人」のように話してください。声はブラウザの音声認識（Google）に送られます。ご本人の声は録りません。</p>
+          <div class="row"><button id="mic" class="button">押して話す</button><span id="micState" class="hint"></span></div>
+          <label for="memo" class="field-label">声メモの文字（その場で直せます）</label>
+          <textarea id="memo" rows="3"></textarea>
+          <div class="row"><button id="addMemo" class="button primary">計画に入れる</button></div>
+          <p id="memoError" class="error" role="alert" hidden></p>
+          <ol id="memos"></ol>
+          <h3>話に出た人の名前（Claude に送りません）</h3>
+          <p class="hint">ここに入れた名前は、声メモで言ってしまっても送る前に呼び名へ置き換えます。入れていない名前は置き換えられません。</p>
+          <div class="row">
+            <input id="personName" class="plan-input short" placeholder="名前" aria-label="名前">
+            <input id="personAlias" class="plan-input short" placeholder="呼び名（例：隣の人）" aria-label="呼び名">
+            <button id="addPerson" class="button">入れる</button>
+          </div>
+          <ul id="people" class="people"></ul>
+          <details><summary>Claude に送った中身を見る</summary><pre id="sentRaw">まだ送っていません</pre></details>
+        </div>
+        <div class="panel">
+          <h2>1週間の様子（昼）</h2>
+          <div id="talkWeek"></div>
+          <h2 class="gap-top">計画</h2>
+          <p class="hint">どの欄も直せます。人が直した欄は、AI が上書きしません。</p>
+          <div id="conflicts"></div>
+          <div id="planFields"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>小さな頼みごと</h2>
+        <p class="hint">全部埋めなくて大丈夫です。まず1つ選びます。頼むのはご本人かご家族で、道具は相手に連絡しません。</p>
+        <div id="requests"></div>
+        <h3>気になること</h3>
+        <ul id="findings"></ul>
+      </div>
     </section>
   </main>
 

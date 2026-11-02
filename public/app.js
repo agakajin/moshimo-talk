@@ -3,6 +3,7 @@ import { decodeCsv, parseCsv } from "/core/csv.js";
 import { maskTable } from "/core/mask.js";
 import { findLeaks } from "/core/redact.js";
 import { importRow, serviceGaps } from "/core/plan.js";
+import { startTalk } from "/talk.js";
 
 const TARGETS = {
   "self.name": "本人の氏名",
@@ -150,7 +151,8 @@ function confirmMapping() {
     used.set(s.value, s.dataset.header);
     mapping[s.dataset.header] = s.value;
   }
-  renderResult(importRow({ headers: state.table.headers, row: state.table.rows[Number($("who").value) || 0], mapping }));
+  state.imported = importRow({ headers: state.table.headers, row: state.table.rows[Number($("who").value) || 0], mapping });
+  renderResult(state.imported);
   goTo(4);
 }
 
@@ -218,4 +220,11 @@ document.querySelectorAll("[data-sample]").forEach((b) => b.addEventListener("cl
 }));
 $("send").addEventListener("click", sendColumns);
 $("confirm").addEventListener("click", confirmMapping);
+$("startTalk").addEventListener("click", () => {
+  for (const id of ["step1", "step2", "step3", "step4"]) $(id).hidden = true;
+  document.querySelector(".steps").hidden = true;
+  document.querySelector(".top h1").textContent = "訪問";
+  document.querySelector(".top p").textContent = "話を聞いて、段取りと次の一歩を決めます。決めるのはご本人です。";
+  startTalk(state.imported);
+});
 goTo(1);
