@@ -33,7 +33,8 @@
           <input id="resume" type="file" accept=".json,application/json" hidden>
         </label>
         <span class="or">架空のデータで試す</span>
-        <button id="quickStart" class="button primary">岡野さんで、すぐ試す</button>
+        <button id="quickStart" class="button primary" data-quick="okano">岡野さんで、すぐ試す</button>
+        <button id="quickStartB" class="button" data-quick="yoshikawa">𠮷川さんで、すぐ試す</button>
         <button class="button" data-sample="keahakka_okano.csv">岡野ハルさん</button>
         <button class="button" data-sample="keahakka_yoshikawa.csv">𠮷川正一さん</button>
       </div>
@@ -106,6 +107,7 @@
           <button id="goWrap" class="button primary">帰る前へ</button>
         </div>
       </div>
+      <p id="workState" class="work-state" role="status" hidden></p>
       <p id="talkMode" class="notice" hidden></p>
       <div class="talk-grid">
         <div class="panel">

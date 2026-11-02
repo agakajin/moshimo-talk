@@ -73,7 +73,8 @@ carry 持ち出すものと置き場所／considerations.items 配慮するこ�
 - quote には、根拠にしたメモの文字をそのまま写す。写せないものは書き込まない
 - value は短くまとめる。話した言葉を変えて意味を足さない
 - helpers は手伝ってくれそうな人。alias は「隣の人」「娘さん」のように続き柄や位置で書き、名前は書かない。asked は避難のことをすでに頼んでいるなら true、awayWeekdayDaytime は平日の昼にいないと話したときだけ true
-- 計画にすでに入っている内容と同じなら、書かなくてよい`,
+- 計画にすでに入っている内容と同じなら、書かなくてよい
+- 持ち出しや配慮のように増えていく欄は、計画に入っている内容と合わせた全体を value に書く。前の内容を消さない`,
   schema: object({
     updates: list(object({
       path: { type: "string", enum: SCRIBE_PATHS },

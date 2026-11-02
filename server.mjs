@@ -18,6 +18,7 @@ const PUBLIC_DEMO = process.env.PUBLIC_DEMO === "1";
 const limiter = createLimiter({
   perMinute: Number(process.env.LIMIT_PER_MINUTE ?? 40),
   perDay: Number(process.env.LIMIT_PER_DAY ?? 500),
+  perClientDay: Number(process.env.LIMIT_PER_CLIENT_DAY ?? 200),
 });
 
 const problem = startupProblem({ host: HOST, password: PASSWORD });
@@ -93,8 +94,12 @@ async function connectClaude() {
 const MODE = process.env.ANTHROPIC_API_KEY ? "claude" : "mock";
 const ENGINE = MODE === "claude" ? await connectClaude() : MOCK;
 
+// 公開デモで読めるのは架空のサンプルの列だけ。画面で隠すだけでなく、ここでも止める
+const SAMPLE_HEADERS = new Set(Object.keys(JSON.parse(await readFile(join(ROOT, "samples", "keahakka.mapping.json"), "utf-8"))));
+const samplesOnly = (p) => (PUBLIC_DEMO && !p.columns.every((c) => SAMPLE_HEADERS.has(c.header)) ? ["公開デモでは架空のサンプルだけ使えます"] : []);
+
 const API = {
-  "/api/read-columns": { validate: validateColumnsPayload, run: (p) => ENGINE.readColumns(p) },
+  "/api/read-columns": { validate: (p) => { const e = validateColumnsPayload(p); return e.length ? e : samplesOnly(p); }, run: (p) => ENGINE.readColumns(p) },
   "/api/scribe": { validate: validateScribePayload, run: (p) => ENGINE.scribe(p) },
   "/api/check": { validate: validateCheckPayload, run: (p) => ENGINE.check(p) },
 };
@@ -106,8 +111,13 @@ async function handleApi(req, res, route) {
   } catch {
     return sendJson(res, 400, { errors: ["内容を読めませんでした"] });
   }
-  const errors = route.validate(payload);
-  if (errors.length > 0) return sendJson(res, 422, { errors });
+  try {
+    const errors = route.validate(payload);
+    if (errors.length > 0) return sendJson(res, 422, { errors });
+  } catch {
+    // 入れ子が深すぎるものなど。1人の変な送信で全員を止めない
+    return sendJson(res, 400, { errors: ["内容を読めませんでした"] });
+  }
   try {
     return sendJson(res, 200, { mode: MODE, ...(await route.run(payload)) });
   } catch (e) {

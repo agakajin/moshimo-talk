@@ -29,6 +29,9 @@ export function startWrap(state, findings, config) {
 
   function renderSummary() {
     const { done, next } = buildSummary(plan, findings);
+    const unfinished = state.unfinishedMemos?.() ?? 0;
+    if (unfinished > 0) next.unshift(`計画に入っていない声メモが${unfinished}件あります。話に戻って確かめてください`);
+    if (state.checkFailed) next.unshift("点検ができなかったので、気になることの指摘が入っていません。話に戻って「帰る前へ」を押すと、もう一度点検します");
     $("doneList").replaceChildren(...(done.length ? done : ["これから話します"]).map((t) => el("li", { textContent: t })));
     $("nextList").replaceChildren(...(next.length ? next : ["今日はここまでで大丈夫です"]).map((t) => el("li", { textContent: t })));
     $("askedList").replaceChildren(...plan.requests.map((r) => {
@@ -82,6 +85,13 @@ export function startWrap(state, findings, config) {
       el("td", { textContent: c }), el("td", { textContent: row[i] }))));
   }
 
+  // 帰る前の画面を開いたあとに書き取りが終わることがある
+  state.refreshWrap = () => {
+    if ($("wrap").hidden) return;
+    renderSummary();
+    renderSheet();
+    renderCsvPreview();
+  };
   renderSummary();
   renderConsent();
   renderSheet();

@@ -273,15 +273,16 @@ $("resume").addEventListener("change", async (e) => {
     showError($("fileError"), `読み込めませんでした。${err.message}`);
   }
 });
-$("quickStart").addEventListener("click", async () => {
+document.querySelectorAll("[data-quick]").forEach((b) => b.addEventListener("click", async () => {
+  const name = b.dataset.quick;
   const [bytes, mapping, script] = await Promise.all([
-    fetch("/samples/keahakka_okano.csv").then((r) => r.arrayBuffer()),
+    fetch(`/samples/keahakka_${name}.csv`).then((r) => r.arrayBuffer()),
     fetch("/samples/keahakka.mapping.json").then((r) => r.json()),
-    fetch("/samples/okano.script.json").then((r) => r.json()),
+    fetch(`/samples/${name}.script.json`).then((r) => r.json()),
   ]);
   const table = parseCsv(decodeCsv(new Uint8Array(bytes)));
   beginTalk(importRow({ headers: table.headers, row: table.rows[0], mapping }), { script });
-});
+}));
 fetch("/api/config").then((r) => r.json()).then(({ publicDemo }) => {
   if (!publicDemo) return;
   // 公開デモでは実在のデータが入らないよう、架空のサンプルだけにする

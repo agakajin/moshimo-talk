@@ -2,6 +2,7 @@
 import { applyUpdates, editField, planForClaude, serviceGaps } from "/core/plan.js";
 import { findLeaks, redact, redactDeep } from "/core/redact.js";
 import { nextTopic, REQUEST_NOTE } from "/core/talk.js";
+import { createLatest, createQueue } from "/core/work.js";
 import { startWrap } from "/wrap.js";
 
 const FIELDS = [
@@ -36,9 +37,18 @@ const el = (tag, props = {}, ...children) => {
 };
 const getAt = (obj, path) => path.split(".").reduce((o, k) => o[k], obj);
 
+const WAIT_LIMIT = 90_000; // 電波の弱い家でも待ち続けない
+const WRAP_WAIT = 20_000;
+const MAX_MEMO = 1000;
+
 async function post(url, body) {
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const data = await res.json();
+  let res;
+  try {
+    res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(WAIT_LIMIT) });
+  } catch (e) {
+    throw new Error(e.name === "TimeoutError" ? "時間がかかりすぎました。電波を確かめてください" : "つながりませんでした。電波を確かめてください");
+  }
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data.errors ?? ["送れませんでした"]).join(" / "));
   return data;
 }
@@ -49,26 +59,37 @@ export function startTalk(state, { script = null } = {}) {
   const gaps = serviceGaps(plan);
   let scriptIndex = 0;
   let config = null;
-  fetch("/samples/hakka-village.config.json").then((r) => r.json()).then((c) => { config = c; });
+  const loadConfig = () => fetch("/samples/hakka-village.config.json").then((r) => r.json()).then((c) => { config = c; }).catch(() => {});
+  loadConfig();
   const skipped = [];
   const shownInterrupts = new Set();
   let findings = [];
   let checkError = "";
   let interrupt = null;
   let memoCount = 0;
+  let pendingMemos = 0;
+  let checking = false;
+  const scribeQueue = createQueue();
+  const checker = createLatest(runCheck);
+  const refreshFindings = () => (pendingMemos > 0 ? Promise.resolve() : checker.request());
 
   const known = [
     { value: identity["self.name"], alias: "本人" },
     { value: identity["self.kana"], alias: "本人" },
     { value: identity["self.address"], alias: "自宅", kind: "address" },
     { value: identity["emergency.name"], alias: "緊急連絡先" },
+    { value: identity["self.phone"], alias: "[電話番号]", kind: "phone" },
+    { value: identity["emergency.phone"], alias: "[電話番号]", kind: "phone" },
   ];
   // 性別は「女」など一般の言葉なので、漏れの検査の対象にしない
   const secrets = Object.entries(identity).filter(([k]) => k !== "self.gender").map(([, v]) => v).filter(Boolean);
   for (const p of state.people) {
     known.unshift({ value: p.name, alias: p.alias });
     secrets.push(p.name);
-    if (p.phone) secrets.push(p.phone);
+    if (p.phone) {
+      known.push({ value: p.phone, alias: "[電話番号]", kind: "phone" });
+      secrets.push(p.phone);
+    }
   }
 
   $("talk").hidden = false;
@@ -100,6 +121,9 @@ export function startTalk(state, { script = null } = {}) {
   }
 
   function renderPlan() {
+    // 答えは入力の途中でも届くので、打っている欄はそのまま残す
+    const active = document.activeElement?.closest?.("#planFields") ? document.activeElement : null;
+    const draft = active && { path: active.dataset.path, value: active.value, at: active.selectionStart };
     const rows = FIELDS.map(([path, label]) => {
       const f = getAt(plan, path);
       const input = el("input", { className: "plan-input", value: f.value ?? "", placeholder: "未決定", ariaLabel: label });
@@ -119,10 +143,17 @@ export function startTalk(state, { script = null } = {}) {
       el("span", { textContent: `${h.alias}${h.awayWeekdayDaytime ? "（平日の昼は不在）" : ""}${h.asked ? "" : "・まだ頼んでいない"}` }),
       el("span", { className: "source", textContent: "声メモから" })));
     $("planFields").replaceChildren(...rows, ...helpers);
+    if (draft?.path) {
+      const input = [...$("planFields").querySelectorAll("input")].find((i) => i.dataset.path === draft.path);
+      input.value = draft.value;
+      input.focus();
+      input.setSelectionRange(draft.at, draft.at);
+    }
   }
 
   function renderRequests() {
-    const options = findings.filter((f) => f.request);
+    // 点検の文が変わっても、選んだものは一覧に残して外せるようにする
+    const options = [...new Set([...plan.requests, ...findings.filter((f) => f.request).map((f) => f.request)])].map((request) => ({ request }));
     if (options.length === 0) {
       $("requests").replaceChildren(el("p", { className: "hint", textContent: "話が進むと、ここに案が出ます。" }));
     } else {
@@ -142,7 +173,7 @@ export function startTalk(state, { script = null } = {}) {
       ? [el("li", { className: "notice", textContent: checkError })]
       : findings.length
       ? findings.map((f) => el("li", { textContent: `${f.text}（${f.yardstick}）` }))
-      : [el("li", { className: "hint", textContent: "今のところありません。" })]));
+      : [el("li", { className: "hint", textContent: checking ? "点検しています。" : "今のところありません。" })]));
   }
 
   function renderAll() {
@@ -157,7 +188,9 @@ export function startTalk(state, { script = null } = {}) {
   }
 
   // 手で直した欄も、送る形にするときは置き換える
-  const planToSend = () => redactDeep(planForClaude(plan), known);
+  function planToSend() {
+    return redactDeep(planForClaude(plan), known);
+  }
 
   function guarded(body) {
     const leaks = findLeaks(body, secrets);
@@ -170,52 +203,100 @@ export function startTalk(state, { script = null } = {}) {
     $("talkMode").textContent = "今は Claude につないでいません。書き取りと点検は、台本の言葉にだけ反応する仮の答えです。";
   }
 
-  async function refreshFindings() {
+  function renderWork() {
+    const parts = [];
+    if (pendingMemos > 0) parts.push(`声メモを書き取っています（あと${pendingMemos}件）`);
+    if (checking) parts.push("裏で点検しています");
+    $("workState").hidden = parts.length === 0;
+    $("workState").textContent = parts.length ? `${parts.join("／")}。話を続けて大丈夫です。` : "";
+  }
+
+  async function runCheck(isStale) {
+    // 書き取りが残っているときの答えは、すぐ古くなるので使わない
+    const outdated = () => isStale() || pendingMemos > 0;
+    checking = true;
+    renderWork();
+    renderRequests();
     try {
       const body = guarded({ plan: planToSend(), gaps });
+      showSent("点検役へ", body);
       const data = await post("/api/check", body);
+      if (outdated()) return;
       markMode(data.mode);
       findings = data.findings;
       checkError = "";
       interrupt = findings.find((f) => f.interrupt && !shownInterrupts.has(f.id)) ?? null;
       if (interrupt) shownInterrupts.add(interrupt.id);
     } catch (e) {
+      if (outdated()) return;
       // 「ありません」と見えないよう、点検できなかったことを出す
       checkError = `点検できませんでした。${e.message}`;
+    } finally {
+      checking = false;
+      renderWork();
     }
     renderOpener();
     renderRequests();
   }
 
-  async function addMemo() {
+  function addMemo() {
     $("memoError").hidden = true;
     const raw = $("memo").value;
     if (!raw.trim()) return;
-    $("addMemo").disabled = true;
+    let memo;
     try {
-      const memo = redact(raw, known);
-      const body = guarded({ memo, plan: planToSend() });
-      showSent("書き取り役へ", body);
-      const data = await post("/api/scribe", body);
-      markMode(data.mode);
-      memoCount += 1;
-      const conflicts = applyUpdates(plan, data.updates, memoCount);
-      renderConflicts(conflicts);
-      $("memos").append(el("li", { textContent: memo }));
-      $("memo").value = "";
-      interrupt = null;
-      renderAll();
-      await refreshFindings();
+      if (raw.length > MAX_MEMO) throw new Error(`声メモが長すぎます（${raw.length}字）。${MAX_MEMO}字までに分けて入れてください。`);
+      memo = redact(raw, known);
+      guarded({ memo });
     } catch (e) {
       $("memoError").textContent = e.message;
       $("memoError").hidden = false;
-    } finally {
-      $("addMemo").disabled = false;
+      return;
     }
+    $("memo").value = "";
+    const item = el("li", { className: "pending", textContent: memo });
+    $("memos").append(item);
+    sendMemo(memo, item);
   }
 
-  function renderConflicts(conflicts) {
-    $("conflicts").replaceChildren(...conflicts.map((c) => {
+  function sendMemo(memo, item, { late = false } = {}) {
+    pendingMemos += 1;
+    renderWork();
+    scribeQueue.add(async () => {
+      try {
+        const body = guarded({ memo, plan: planToSend() });
+        showSent("書き取り役へ", body);
+        const data = await post("/api/scribe", body);
+        markMode(data.mode);
+        memoCount += 1;
+        appendConflicts(applyUpdates(plan, data.updates, memoCount, { late }));
+        item.className = "";
+        if (data.dropped > 0) item.append(el("small", { className: "hint", textContent: ` 一部は根拠を確かめられず、計画に入れていません。欄を確かめてください。` }));
+        interrupt = null;
+      } catch (e) {
+        // 話した内容を失わないよう、一覧に残してやり直せるようにする
+        item.className = "failed";
+        const retry = el("button", { className: "button", textContent: "もう一度入れる" });
+        retry.addEventListener("click", () => {
+          retry.remove();
+          item.className = "pending";
+          sendMemo(memo, item, { late: true });
+        });
+        item.append(" ", retry);
+        $("memoError").textContent = `計画に入りませんでした。${e.message}`;
+        $("memoError").hidden = false;
+      } finally {
+        pendingMemos -= 1;
+        renderWork();
+        renderAll();
+        refreshFindings();
+        state.refreshWrap?.();
+      }
+    });
+  }
+
+  function appendConflicts(conflicts) {
+    $("conflicts").append(...conflicts.map((c) => {
       const yes = el("button", { className: "button", textContent: "こちらに変える" });
       const box = el("p", { className: "notice" }, `「${c.current}」を「${c.proposed}」に変えますか？ `, yes);
       yes.addEventListener("click", () => {
@@ -234,9 +315,17 @@ export function startTalk(state, { script = null } = {}) {
     const alias = $("personAlias").value.trim();
     const phone = $("personPhone").value.replace(/\D/g, "");
     if (!name || !alias) return;
+    if (findLeaks(alias, [name]).length > 0) {
+      $("memoError").textContent = "呼び名に名前が入っています。「隣の人」のように続き柄や位置で入れてください。";
+      $("memoError").hidden = false;
+      return;
+    }
     known.unshift({ value: name, alias });
     secrets.push(name);
-    if (phone) secrets.push(phone);
+    if (phone) {
+      known.push({ value: phone, alias: "[電話番号]", kind: "phone" });
+      secrets.push(phone);
+    }
     state.people.push({ name, alias, phone });
     const helper = plan.helpers.find((h) => h.alias === alias);
     if (helper) helper.asked = true;
@@ -247,6 +336,7 @@ export function startTalk(state, { script = null } = {}) {
     $("personName").value = "";
     $("personAlias").value = "";
     $("personPhone").value = "";
+    refreshFindings();
   });
   $("nextMemo").hidden = !script;
   $("nextMemo").addEventListener("click", async () => {
@@ -256,7 +346,27 @@ export function startTalk(state, { script = null } = {}) {
     $("nextMemo").hidden = scriptIndex >= script.length;
     await addMemo();
   });
-  $("goWrap").addEventListener("click", () => startWrap(state, findings, config));
+  $("goWrap").addEventListener("click", async () => {
+    // 次の一歩に指摘が入るよう、途中の仕事が終わってから進む
+    $("goWrap").disabled = true;
+    const work = (async () => {
+      await scribeQueue.idle().catch(() => {});
+      await checker.idle().catch(() => {});
+      if (checkError) await checker.request().catch(() => {});
+    })();
+    // 待ち続けない。残りは帰る前の画面で知らせる
+    await Promise.race([work, new Promise((resolve) => setTimeout(resolve, WRAP_WAIT))]);
+    if (!config) await loadConfig();
+    $("goWrap").disabled = false;
+    if (!config) {
+      $("memoError").textContent = "画面の設定を読めませんでした。電波を確かめて、もう一度押してください。";
+      $("memoError").hidden = false;
+      return;
+    }
+    state.checkFailed = Boolean(checkError);
+    state.unfinishedMemos = () => $("memos").querySelectorAll(".pending, .failed").length;
+    startWrap(state, findings, config);
+  });
   $("skip").addEventListener("click", () => {
     if (interrupt) {
       plan.nextSteps.push({ topic: interrupt.id, text: interrupt.opener });

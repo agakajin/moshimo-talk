@@ -43,6 +43,10 @@ main { max-width: 1040px; margin: 0 auto; padding: 20px 24px 64px; }
 .panel h3 { margin: 16px 0 6px; font-size: 16px; }
 
 .hint { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+.work-state { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+#memos .pending { color: var(--muted); }
+#memos .pending::after { content: "（書き取り中）"; }
+#memos .failed { color: var(--warn); }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
 .or { color: var(--muted); font-size: 14px; margin-left: 12px; }
 .who { margin: 0 0 12px; }

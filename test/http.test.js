@@ -148,3 +148,23 @@ test("鍵が無ければ仮の答えと分かる", async (t) => {
   const res = await postColumns(`http://127.0.0.1:${await ready}`);
   assert.equal((await res.json()).mode, "mock");
 });
+
+test("公開デモでは、サーバーでもサンプル以外の列を断り、長い声メモも断る", async (t) => {
+  const { child, ready } = run({ HOST: "127.0.0.1", APP_PASSWORD: "", PUBLIC_DEMO: "1" });
+  t.after(() => child.kill());
+  const base = `http://127.0.0.1:${await ready}`;
+  const send = (columns) => fetch(`${base}/api/read-columns`, { method: "POST", body: JSON.stringify({ columns }) });
+  assert.equal((await send([{ header: "利用者名", withheld: false, samples: ["文字列1"] }])).status, 200);
+  assert.equal((await send([{ header: "本物の台帳の列", withheld: false, samples: ["文字列1"] }])).status, 422);
+  const long = await fetch(`${base}/api/scribe`, { method: "POST", body: JSON.stringify({ memo: "あ".repeat(1001), plan: {} }) });
+  assert.equal(long.status, 422);
+});
+
+test("1人で1日の上限を使い切ると止まるが、ほかの人は使える", async (t) => {
+  const { createLimiter } = await import("../src/server/limits.js");
+  const limiter = createLimiter({ perMinute: 100, perDay: 100, perClientDay: 2, now: () => 0 });
+  assert.equal(limiter.check("a").ok, true);
+  assert.equal(limiter.check("a").ok, true);
+  assert.equal(limiter.check("a").ok, false);
+  assert.equal(limiter.check("b").ok, true);
+});

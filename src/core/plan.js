@@ -84,11 +84,18 @@ export function planForClaude(plan) {
 }
 
 // 書き取りの結果を計画に入れる。人が直した欄と CSV から来た欄は上書きせず、尋ねるために返す
-export function applyUpdates(plan, updates, memoId) {
+// late は、失敗したメモをあとから入れ直すとき。新しい話を古い話で消さないよう、尋ねる側に回す
+export function applyUpdates(plan, updates, memoId, { late = false } = {}) {
   const conflicts = [];
   for (const { path, value } of updates) {
     if (path === "helpers.add") {
-      if (!plan.helpers.some((h) => h.alias === value.alias)) plan.helpers.push({ ...value, memoId });
+      const known = plan.helpers.find((h) => h.alias === value.alias);
+      if (!known) plan.helpers.push({ ...value, memoId });
+      else {
+        // あとから「頼んだ」と聞いたら直す
+        if (value.asked) known.asked = true;
+        if (value.awayWeekdayDaytime) known.awayWeekdayDaytime = true;
+      }
       continue;
     }
     if (path === "hazards.noOthers" || path === "considerations.noOthers") {
@@ -97,7 +104,7 @@ export function applyUpdates(plan, updates, memoId) {
     }
     const target = getAt(plan, path);
     if (!target || !("status" in target)) continue;
-    if (target.source === "human" || target.source === "csv") {
+    if (target.source === "human" || target.source === "csv" || (late && target.status === "filled")) {
       if (target.value !== value) conflicts.push({ path, current: target.value, proposed: value, memoId });
       continue;
     }

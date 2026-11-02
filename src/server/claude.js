@@ -1,4 +1,5 @@
 // 本物の Claude への窓口。答えはそのまま使わず、決まりに合うものだけを通す
+import { minutesIn, parseMinutes } from "../core/normalize.js";
 import { personalKind } from "../core/redact.js";
 import { COMMON_YARDSTICKS, READER, READER_TARGETS, SCRIBE, SCRIBE_PATHS, checkPrompt } from "./prompts.js";
 
@@ -6,8 +7,11 @@ export const DEFAULT_MODEL = "claude-opus-5-5";
 const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 const MAX_FINDINGS = 6;
 
-const MEDICAL = /診断|処方|服薬|服用|投薬|減薬|薬の量|薬[をは]?.{0,4}(?:増|減|控|やめ|変え|飲)|飲まなく|受診|治療|血圧が|悪化|疑われ|認知症|糖尿病|病院で|医師に|診て/;
-const PROMISE = /必ず|絶対|毎回|約束|責任を持|義務|迎えに行きます|連絡します|電話します/;
+// 点検の指摘に残さない医療の判断。声メモの事実（「認知症で夜に歩く」）はここに当てない
+const MEDICAL = /診断|処方|服薬|服用|投薬|減薬|薬の量|薬[をは]?.{0,6}(?:増|減|控|やめ|止め|変え|飲|半分|大丈夫)|飲まなく|受診|治療|入院|血圧[がは]|悪化|疑われ|認知症|糖尿病|脳梗塞|心臓|病院で|医師に|診て|酸素.{0,6}(?:外|やめ|止め|減|増)/;
+// 書き取りで止めるのは、やめる・止めるといった指図だけ
+const MEDICAL_ORDER = /(?:薬|酸素|インスリン|透析).{0,8}(?:やめ|止め|減らす|増やす|控え|外す|外して)/;
+const PROMISE = /必ず|かならず|絶対|ぜったい|毎回|毎晩|約束|責任を持|責任をも|義務|迎えに行|迎えに来ます|してあげ|連絡します|電話します/;
 
 export class ClaudeError extends Error {
   constructor(message, status = 502) {
@@ -42,15 +46,18 @@ export function summarizePlan(plan) {
 
 const squeeze = (text) => String(text).replace(/[\s　、。，．,.]/g, "");
 const isQuoted = (quote, memo) => squeeze(quote).length >= 2 && squeeze(memo).includes(squeeze(quote));
-// 値の文字の多くがメモにあるか。「崖」から「土砂」のように言い換える欄は除く
-const REWORDED = new Set(["hazards.items"]);
+// 固有の言葉が入る欄は、値がメモの言葉を使っているか調べる。ほかの欄は言い換えやまとめがあるので調べない
+const SAME_WORDS = new Set(["evacuation.place", "home.community", "home.bedroom", "home.usualRoom"]);
 function sharesWords(value, memo) {
-  const chars = [...squeeze(value).replace(/[()（）「」・]/g, "")];
+  const v = squeeze(value);
   const m = squeeze(memo);
-  return chars.length > 0 && chars.filter((c) => m.includes(c)).length / chars.length >= 0.6;
+  for (let i = 0; i + 2 <= v.length; i += 1) if (m.includes(v.slice(i, i + 2))) return true;
+  return false;
 }
-const ASKED = /頼ん|お願いし|引き受/;
-const NOT_ASKED = /頼んでいない|頼んでない|お願いしていない|まだ頼/;
+const ASKED = /頼ん|頼み|お願いし|引き受/;
+const NOT_ASKED = /頼んでいない|頼んでない|頼んでません|頼めていない|お願いしていない|まだ/;
+// 呼び名は続き柄か位置で書く。分からないものは名前かもしれないので、一般の呼び方にする
+const RELATION = /隣|近所|近く|向かい|同じ|娘|息子|嫁|婿|孫|夫|妻|兄|姉|弟|妹|親|母|父|祖|家族|友|民生|委員|職員|ヘルパー|人|方/;
 
 export function acceptColumns(results, columns) {
   const byHeader = new Map(results.map((r) => [r.header, r]));
@@ -66,26 +73,27 @@ export function acceptColumns(results, columns) {
 export function acceptScribe({ updates, helpers }, memo) {
   const accepted = [];
   for (const { path, value, quote } of updates) {
-    if (!SCRIBE_PATHS.includes(path) || !isQuoted(quote, memo) || personalKind(value) || MEDICAL.test(value)) continue;
+    if (!SCRIBE_PATHS.includes(path) || !isQuoted(quote, memo) || personalKind(value) || MEDICAL_ORDER.test(value)) continue;
     if (path.endsWith(".noOthers")) {
-      if (value === "true" && /ほか|他/.test(quote) && /ない|なし/.test(quote)) accepted.push({ path, value: true });
+      if (value === "true" && /ほか|他/.test(quote) && /ない|なし|ません/.test(quote)) accepted.push({ path, value: true });
       continue;
     }
     if (path.endsWith("Minutes")) {
-      const minutes = value.normalize("NFKC").replace(/分$/, "").trim();
-      const said = quote.normalize("NFKC");
-      if (/^\d+$/.test(minutes) && (said.includes(minutes) || /時間/.test(said))) accepted.push({ path, value: minutes });
+      // 値の分数が、根拠の文に出てくる時間と合っているか
+      const minutes = parseMinutes(value);
+      if (minutes !== null && minutesIn(quote).includes(minutes)) accepted.push({ path, value: String(minutes) });
       continue;
     }
     const text = value.trim();
-    if (text === "" || (!REWORDED.has(path) && !sharesWords(text, memo))) continue;
+    if (text === "" || (SAME_WORDS.has(path) && !sharesWords(text, memo))) continue;
     accepted.push({ path, value: text });
   }
   for (const { alias, awayWeekdayDaytime, asked, quote } of helpers) {
     if (!isQuoted(quote, memo) || alias.trim() === "" || personalKind(alias)) continue;
     // 頼んだかどうかは本人の1枚と CSV に直結するので、メモの言葉で確かめる
     const reallyAsked = asked === true && ASKED.test(memo) && !NOT_ASKED.test(memo);
-    accepted.push({ path: "helpers.add", value: { alias: alias.trim(), awayWeekdayDaytime, asked: reallyAsked } });
+    const name = RELATION.test(alias) ? alias.trim() : "近くの人";
+    accepted.push({ path: "helpers.add", value: { alias: name, awayWeekdayDaytime, asked: reallyAsked } });
   }
   return accepted;
 }
@@ -119,7 +127,11 @@ export function timeFinding(plan, targetMinutes) {
   const prep = plan?.evacuation?.prepMinutes;
   const move = plan?.evacuation?.moveMinutes;
   if (prep?.status !== "filled" || move?.status !== "filled") return null;
-  const total = Number(prep.value) + Number(move.value);
+  const [a, b] = [parseMinutes(prep.value), parseMinutes(move.value)];
+  if (a === null || b === null) {
+    return { id: "in-time-unread", yardstick: "間に合うか", text: "準備か移動の時間を数字で読めませんでした。欄を確かめてください。" };
+  }
+  const total = a + b;
   if (!(total > targetMinutes)) return null;
   return { id: "in-time", yardstick: "間に合うか", text: `準備と移動で${total}分かかり、目安の${targetMinutes}分を超えます。` };
 }
@@ -164,7 +176,9 @@ export function createClaude({ client, village, model = DEFAULT_MODEL, onUsage =
     },
     async scribe({ memo, plan }) {
       const answer = await ask("scribe", SCRIBE, { memo, plan: summarizePlan(plan) });
-      return { updates: acceptScribe(answer, memo) };
+      const updates = acceptScribe(answer, memo);
+      // 捨てたものがあれば画面で知らせる
+      return { updates, dropped: answer.updates.length + answer.helpers.length - updates.length };
     },
     async check({ plan, gaps }) {
       const { findings } = await ask("check", checker, { plan: summarizePlan(plan), gaps });

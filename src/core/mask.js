@@ -1,6 +1,6 @@
 // Claude に渡す前に、本物の値を記号に置き換える。対応表は手元から出さない
 import { normalizeDate, normalizePhone, normalizePostal, normalizeText, toHalfWidth } from "./normalize.js";
-import { personalKind } from "./redact.js";
+import { formKind } from "./redact.js";
 
 const WITHHELD_HEADER = /備考|メモ|特記|自由記述|コメント/;
 
@@ -19,10 +19,10 @@ export function classifyValue(raw) {
 }
 
 // 見出しに値が入っているか。見出しの無い CSV では、1人目の情報が見出しに来る
-const HEADER_WORD = /氏名|名前|連絡|電話|住所|番号|日|者|先/;
+const HEADER_WORD = /氏名|名前|連絡|電話|住所|番号|年月日|性別|状態|予定|区分|認定|介護|歩行|階段|同居|家族|備考|担当|緊急|週間|サービス|部屋|寝室|聞こえ|フリガナ|ふりがな|カナ/;
 export function looksLikeValue(header) {
   const text = normalizeText(header);
-  if (classifyValue(text) !== "文字列" || personalKind(text)) return true;
+  if (formKind(text)) return true;
   return /^[一-龥々ァ-ヶぁ-ゖー]+ [一-龥々ァ-ヶぁ-ゖー]+$/.test(text) && !HEADER_WORD.test(text);
 }
 
@@ -51,7 +51,8 @@ export function maskTable({ headers, rows }, { sampleRows = 5 } = {}) {
     return {
       header,
       withheld: false,
-      suspectHeader: cellSet.has(normalizeText(header)) || looksLikeValue(header),
+      // 「同居」「歩行」のように列の値と同じ見出しはあるので、見出しの言葉なら通す
+      suspectHeader: (cellSet.has(normalizeText(header)) && !HEADER_WORD.test(header)) || looksLikeValue(header),
       samples: rows.slice(0, sampleRows).map((row) => toSymbol(row[col] ?? "")),
     };
   });

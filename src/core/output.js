@@ -1,4 +1,5 @@
 // 帰る前に出すもの。すべて決まった通りにプログラムで作る。AI に値を作らせない
+import { parseMinutes } from "./normalize.js";
 const filled = (f) => f?.status === "filled";
 const val = (f) => (filled(f) ? f.value : "");
 
@@ -16,10 +17,11 @@ const SECTION_LABEL = {
 const getAt = (obj, path) => path.split(".").reduce((o, k) => o?.[k], obj);
 
 export function totalMinutes(plan) {
-  const prep = Number(val(plan.evacuation.prepMinutes));
-  const move = Number(val(plan.evacuation.moveMinutes));
   if (!filled(plan.evacuation.moveMinutes)) return null;
-  return (Number.isFinite(prep) ? prep : 0) + (Number.isFinite(move) ? move : 0);
+  const move = parseMinutes(val(plan.evacuation.moveMinutes));
+  const prep = filled(plan.evacuation.prepMinutes) ? parseMinutes(val(plan.evacuation.prepMinutes)) : 0;
+  // 読めない時間を 0 にすると、本人の紙に短く出てしまう
+  return move === null || prep === null ? null : prep + move;
 }
 
 export function evacuationSentence(plan, whoLabel) {

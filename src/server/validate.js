@@ -33,6 +33,7 @@ export function validateColumnsPayload(payload) {
 }
 
 const LIMIT = 8000;
+const MAX_MEMO = 1000;
 const PLAN_KEYS = new Set(Object.keys(createPlan()));
 const HELPER_KEYS = new Set(["alias", "asked", "awayWeekdayDaytime", "memoId"]);
 
@@ -60,5 +61,9 @@ function checkPlanPayload(payload, allowed) {
   return [];
 }
 
-export const validateScribePayload = (p) => (typeof p?.memo === "string" && p.memo.trim() !== "" ? checkPlanPayload(p, ["memo", "plan"]) : ["声メモが空です"]);
+export function validateScribePayload(p) {
+  if (typeof p?.memo !== "string" || p.memo.trim() === "") return ["声メモが空です"];
+  if (p.memo.length > MAX_MEMO) return ["声メモが長すぎます。分けて入れてください"];
+  return checkPlanPayload(p, ["memo", "plan"]);
+}
 export const validateCheckPayload = (p) => checkPlanPayload(p, ["plan", "gaps"]);

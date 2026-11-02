@@ -76,3 +76,38 @@ export function normalizeDate(s) {
   if (!iso || iso < info.from || iso > info.to) return null;
   return iso;
 }
+
+function kanjiNumber(s) {
+  if (/^\d+$/.test(s)) return Number(s);
+  const unit = { 十: 10, 百: 100 };
+  const digit = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  let total = 0;
+  let current = 0;
+  for (const c of s) {
+    if (c in digit) current = digit[c];
+    else { total += (current || 1) * unit[c]; current = 0; }
+  }
+  return total + current;
+}
+
+const AMOUNT = "[0-9一二三四五六七八九十百]+";
+
+// 文に出てくる時間を、すべて分で返す（「1時間半」は 90、「準備に15分、移動に30分」は 15 と 30）
+export function minutesIn(text) {
+  const s = String(text ?? "").normalize("NFKC");
+  const found = [];
+  const rest = s.replace(new RegExp(`(${AMOUNT})時間(半)?(?:(${AMOUNT})分)?`, "g"), (_, h, half, m) => {
+    found.push(kanjiNumber(h) * 60 + (half ? 30 : 0) + (m ? kanjiNumber(m) : 0));
+    return " ";
+  }).replace(/半時間/g, () => { found.push(30); return " "; });
+  for (const [, m] of rest.matchAll(new RegExp(`(${AMOUNT})分`, "g"))) found.push(kanjiNumber(m));
+  return found;
+}
+
+// 欄の値を分の数字にする。読めなければ null（少なく見せないため、0 にしない）
+export function parseMinutes(value) {
+  const s = String(value ?? "").normalize("NFKC").trim();
+  if (new RegExp(`^(?:約|およそ)?(${AMOUNT})(?:くらい|ぐらい)?$`).test(s)) return kanjiNumber(s.replace(/\D*?([0-9一二三四五六七八九十百]+).*/, "$1"));
+  const found = minutesIn(s);
+  return found.length === 1 ? found[0] : null;
+}
