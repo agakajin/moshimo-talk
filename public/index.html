@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>hinan-hanashi</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>取り込み</h1>
+    <p>同じことを二度聞かないために、手元のデータで分かる欄を先に埋めます。</p>
+  </header>
+
+  <main>
+    <ol class="steps" aria-label="進み具合">
+      <li data-step="1">CSV を入れる</li>
+      <li data-step="2">送る中身を見る</li>
+      <li data-step="3">列を確かめる</li>
+      <li data-step="4">話すことが残る</li>
+    </ol>
+
+    <section id="step1" class="panel">
+      <h2>介護ソフトの CSV を入れる</h2>
+      <p class="hint">ファイルはこの画面の中で読みます。この時点では、どこにも送りません。</p>
+      <div class="row">
+        <label class="button primary">CSV を選ぶ
+          <input id="file" type="file" accept=".csv,text/csv" hidden>
+        </label>
+        <span class="or">架空のデータで試す</span>
+        <button class="button" data-sample="keahakka_okano.csv">岡野ハルさん</button>
+        <button class="button" data-sample="keahakka_yoshikawa.csv">𠮷川正一さん</button>
+      </div>
+      <p id="fileError" class="error" role="alert" hidden></p>
+    </section>
+
+    <section id="step2" class="panel" hidden>
+      <h2>Claude に送るのは、これだけです</h2>
+      <p class="hint">本物の値は記号に置き換えました。対応表はこの画面の中だけにあります。</p>
+      <div id="suspect" class="error" role="alert" hidden></div>
+      <div class="scroll"><table id="maskTable"></table></div>
+      <details>
+        <summary>送る中身をそのまま見る</summary>
+        <pre id="payloadRaw"></pre>
+      </details>
+      <div class="row">
+        <button id="send" class="button primary">この中身を送って、列を読んでもらう</button>
+      </div>
+      <p id="sendError" class="error" role="alert" hidden></p>
+    </section>
+
+    <section id="step3" class="panel" hidden>
+      <h2>列の読み取りを確かめる</h2>
+      <p id="modeNotice" class="notice" hidden></p>
+      <p class="hint">右の「手元の値」は、この画面の中だけで表示しています。違っていれば選び直してください。</p>
+      <div id="whoRow" class="row who" hidden>
+        <label for="who">どの方の計画を作りますか</label>
+        <select id="who"></select>
+      </div>
+      <div class="scroll"><table id="confirmTable"></table></div>
+      <p id="confirmError" class="error" role="alert" hidden></p>
+      <div class="row">
+        <button id="confirm" class="button primary">この内容で確定する</button>
+      </div>
+    </section>
+
+    <section id="step4" class="panel" hidden>
+      <h2>聞かなくてよいことと、話すこと</h2>
+      <div class="columns">
+        <div>
+          <h3>分かったこと</h3>
+          <dl id="known"></dl>
+        </div>
+        <div>
+          <h3>話すこと</h3>
+          <ul id="toTalk"></ul>
+        </div>
+      </div>
+      <h3>1週間の様子（昼）</h3>
+      <div id="week"></div>
+      <div id="checks"></div>
+      <p class="hint">計画の欄は、まだこの画面の中にしかありません。閉じると消えます。</p>
+    </section>
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
