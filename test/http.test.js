@@ -72,3 +72,16 @@ test("パスワードなしでは画面もデータも API も開けない。死
   });
   assert.equal(rejected.status, 422);
 });
+
+test("公開デモの設定と、回数の上限が効く", async (t) => {
+  const { child, ready } = run({ HOST: "127.0.0.1", APP_PASSWORD: "", PUBLIC_DEMO: "1", LIMIT_PER_MINUTE: "1" });
+  t.after(() => child.kill());
+  const base = `http://127.0.0.1:${await ready}`;
+  assert.deepEqual(await (await fetch(`${base}/api/config`)).json(), { publicDemo: true });
+  const post = () => fetch(`${base}/api/check`, { method: "POST", body: JSON.stringify({ plan: {}, gaps: null }) });
+  const first = await post();
+  assert.equal(first.status, 500, "形のおかしい計画でもサーバーは落ちない");
+  assert.deepEqual(await first.json(), { errors: ["処理に失敗しました"] });
+  assert.equal((await post()).status, 429);
+  assert.equal((await fetch(`${base}/healthz`)).status, 200);
+});

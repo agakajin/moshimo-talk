@@ -7,11 +7,17 @@ import { validateCheckPayload, validateColumnsPayload, validateScribePayload } f
 import { mockReadColumns } from "./src/server/mock-reader.js";
 import { mockCheck, mockScribe } from "./src/server/mock-talk.js";
 import { isAuthorized, SECURITY_HEADERS, startupProblem } from "./src/server/auth.js";
+import { createLimiter } from "./src/server/limits.js";
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
 const PORT = Number(process.env.PORT ?? 5177);
 const HOST = process.env.HOST ?? "127.0.0.1";
 const PASSWORD = process.env.APP_PASSWORD ?? "";
+const PUBLIC_DEMO = process.env.PUBLIC_DEMO === "1";
+const limiter = createLimiter({
+  perMinute: Number(process.env.LIMIT_PER_MINUTE ?? 40),
+  perDay: Number(process.env.LIMIT_PER_DAY ?? 3000),
+});
 
 const problem = startupProblem({ host: HOST, password: PASSWORD });
 if (problem) {
@@ -83,8 +89,13 @@ async function handleApi(req, res, route) {
   }
   const errors = route.validate(payload);
   if (errors.length > 0) return sendJson(res, 422, { errors });
-  // 中身はログに残さない
-  return sendJson(res, 200, { mode: "mock", ...route.run(payload) });
+  try {
+    return sendJson(res, 200, { mode: "mock", ...route.run(payload) });
+  } catch (e) {
+    // 中身はログに残さない
+    console.error("処理に失敗しました", e.name);
+    return sendJson(res, 500, { errors: ["処理に失敗しました"] });
+  }
 }
 
 const server = createServer(async (req, res) => {
@@ -98,7 +109,13 @@ const server = createServer(async (req, res) => {
     res.writeHead(401, { "WWW-Authenticate": 'Basic realm="demo", charset="UTF-8"', "Content-Type": "text/plain; charset=utf-8" });
     return res.end("パスワードが必要です");
   }
-  if (req.method === "POST" && API[pathname]) return handleApi(req, res, API[pathname]);
+  if (req.method === "GET" && pathname === "/api/config") return sendJson(res, 200, { publicDemo: PUBLIC_DEMO });
+  if (req.method === "POST" && API[pathname]) {
+    const client = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress).split(",")[0].trim();
+    const limit = limiter.check(client);
+    if (!limit.ok) return sendJson(res, 429, { errors: [limit.reason] });
+    return handleApi(req, res, API[pathname]);
+  }
   if (req.method !== "GET") return sendJson(res, 405, { errors: ["使えない操作です"] });
   const file = resolveStatic(pathname);
   if (!file) return sendJson(res, 404, { errors: ["見つかりません"] });
