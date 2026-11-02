@@ -25,3 +25,20 @@ export function validateColumnsPayload(payload) {
   });
   return errors;
 }
+
+const PHONE_LIKE = /\d[\d\-‐()\s]{7,}\d/;
+const LIMIT = 8000;
+
+function checkPlanPayload(payload, allowed) {
+  const extra = Object.keys(payload ?? {}).filter((k) => !allowed.includes(k));
+  if (extra.length > 0) return ["決まった項目以外が入っています"];
+  if (typeof payload?.plan !== "object" || payload.plan === null) return ["計画の形が正しくありません"];
+  if (payload.plan.care?.weekly?.value?.unread) return ["読めなかった予定の文は送れません"];
+  const text = JSON.stringify(payload);
+  if (text.length > LIMIT) return ["内容が長すぎます"];
+  if (PHONE_LIKE.test(text)) return ["電話番号らしい数字が入っています"];
+  return [];
+}
+
+export const validateScribePayload = (p) => (typeof p?.memo === "string" && p.memo.trim() !== "" ? checkPlanPayload(p, ["memo", "plan"]) : ["声メモが空です"]);
+export const validateCheckPayload = (p) => checkPlanPayload(p, ["plan", "gaps"]);

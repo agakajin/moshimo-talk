@@ -3,8 +3,9 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateColumnsPayload } from "./src/server/validate.js";
+import { validateCheckPayload, validateColumnsPayload, validateScribePayload } from "./src/server/validate.js";
 import { mockReadColumns } from "./src/server/mock-reader.js";
+import { mockCheck, mockScribe } from "./src/server/mock-talk.js";
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
 const PORT = Number(process.env.PORT ?? 5177);
@@ -45,22 +46,35 @@ const sendJson = (res, status, data) => {
   res.end(JSON.stringify(data));
 };
 
-async function handleReadColumns(req, res) {
+const VILLAGE = JSON.parse(await readFile(join(ROOT, "samples", "hakka-village.config.json"), "utf-8"));
+
+const API = {
+  "/api/read-columns": { validate: validateColumnsPayload, run: (p) => ({ results: mockReadColumns(p) }) },
+  "/api/scribe": { validate: validateScribePayload, run: (p) => ({ updates: mockScribe(p.memo) }) },
+  "/api/check": {
+    validate: validateCheckPayload,
+    run: (p) => ({
+      findings: mockCheck({ plan: p.plan, gaps: p.gaps, targetMinutes: VILLAGE.evacuationTargetMinutes, yardstick: VILLAGE.yardsticks[0] }),
+    }),
+  },
+};
+
+async function handleApi(req, res, route) {
   let payload;
   try {
     payload = JSON.parse(await readBody(req));
   } catch {
     return sendJson(res, 400, { errors: ["内容を読めませんでした"] });
   }
-  const errors = validateColumnsPayload(payload);
+  const errors = route.validate(payload);
   if (errors.length > 0) return sendJson(res, 422, { errors });
   // 中身はログに残さない
-  return sendJson(res, 200, { mode: "mock", results: mockReadColumns(payload) });
+  return sendJson(res, 200, { mode: "mock", ...route.run(payload) });
 }
 
 const server = createServer(async (req, res) => {
   const { pathname } = new URL(req.url, "http://localhost");
-  if (req.method === "POST" && pathname === "/api/read-columns") return handleReadColumns(req, res);
+  if (req.method === "POST" && API[pathname]) return handleApi(req, res, API[pathname]);
   if (req.method !== "GET") return sendJson(res, 405, { errors: ["使えない操作です"] });
   const file = resolveStatic(pathname);
   if (!file) return sendJson(res, 404, { errors: ["見つかりません"] });

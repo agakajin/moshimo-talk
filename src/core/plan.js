@@ -67,3 +67,43 @@ export function serviceGaps(plan) {
   if (!weekly || weekly.items.length === 0) return null;
   return weekdaysWithoutService(weekly.items);
 }
+
+// Claude に渡す形。読めなかった予定の文には事業所名などが残りうるので外す
+export function planForClaude(plan) {
+  const copy = structuredClone(plan);
+  if (copy.care.weekly.value) delete copy.care.weekly.value.unread;
+  return copy;
+}
+
+const getAt = (obj, path) => path.split(".").reduce((o, k) => o?.[k], obj);
+
+// 書き取りの結果を計画に入れる。人が直した欄は上書きせず、尋ねるために返す
+export function applyUpdates(plan, updates, memoId) {
+  const conflicts = [];
+  for (const { path, value } of updates) {
+    if (path === "helpers.add") {
+      if (!plan.helpers.some((h) => h.alias === value.alias)) plan.helpers.push({ ...value, memoId });
+      continue;
+    }
+    if (path === "hazards.noOthers" || path === "considerations.noOthers") {
+      getAt(plan, path.split(".")[0]).noOthers = value === true;
+      continue;
+    }
+    const target = getAt(plan, path);
+    if (!target || !("status" in target)) continue;
+    if (target.source === "human") {
+      if (target.value !== value) conflicts.push({ path, current: target.value, proposed: value, memoId });
+      continue;
+    }
+    Object.assign(target, { value, status: "filled", source: "voice", memoId });
+  }
+  return conflicts;
+}
+
+export function editField(plan, path, value) {
+  const target = getAt(plan, path);
+  const text = value.trim();
+  Object.assign(target, text === ""
+    ? { value: null, status: "undecided", source: null, memoId: null }
+    : { value: text, status: "filled", source: "human", memoId: null });
+}
