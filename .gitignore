@@ -1,0 +1,28 @@
+# 鍵
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+token*.json
+
+# 実在のデータを置かない（デモは samples/ の架空データだけ）
+*.xlsx
+*.xls
+private/
+
+# 道具が書き出すファイル
+*.continue.json
+output/
+
+# 依存・ビルド
+node_modules/
+dist/
+*.log
+
+# OS・エディタ
+.DS_Store
+Thumbs.db
+.vscode/
+.claude/settings.local.json
