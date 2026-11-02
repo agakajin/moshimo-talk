@@ -4,11 +4,11 @@ import { parseWeekly, weekdaysWithoutService } from "./schedule.js";
 import { redact } from "./redact.js";
 
 export const field = () => ({ value: null, status: "undecided", source: null, memoId: null });
-const fromCsv = (value) => ({ value, status: "filled", source: "csv", memoId: null });
 
 export function createPlan() {
   return {
-    care: { level: field(), mobility: field(), weekly: field() },
+    care: { level: field(), mobility: field(), weekly: field(), stairs: field(), hearing: field(), household: field() },
+    home: { community: field(), usualRoom: field(), bedroom: field(), aloneHours: field(), hazardNote: field() },
     hazards: { items: field(), noOthers: false },
     evacuation: { place: field(), means: field(), route: field(), prepMinutes: field(), moveMinutes: field() },
     timeBands: field(),
@@ -17,6 +17,7 @@ export function createPlan() {
     considerations: { items: field(), noOthers: false },
     helpers: [],
     requests: [],
+    requestsDone: [],
     nextSteps: [],
     consent: {
       contact: "unasked",
@@ -38,9 +39,13 @@ const IDENTITY = {
   "emergency.name": normalizeName,
   "emergency.phone": normalizePhone,
 };
+const TEXT_FIELDS = ["care.mobility", "care.stairs", "care.hearing", "care.household", "home.usualRoom", "home.bedroom", "home.hazardNote"];
 
-// 確定した列の対応を使って1行を取り込む。CSV に無い欄は未決定のまま残す
-export function importRow({ headers, row, mapping }) {
+const getAt = (obj, path) => path.split(".").reduce((o, k) => o?.[k], obj);
+const setField = (plan, path, value, source) => Object.assign(getAt(plan, path), { value, status: "filled", source, memoId: null });
+
+// 確定した列の対応を使って1行を取り込む。無い欄は未決定のまま残す
+export function importRow({ headers, row, mapping, source = "csv" }) {
   const identity = {};
   const plan = createPlan();
   const raw = {};
@@ -55,11 +60,13 @@ export function importRow({ headers, row, mapping }) {
     { value: identity["emergency.name"], alias: "緊急連絡先" },
   ];
 
-  if (raw["care.level"]) plan.care.level = fromCsv(normalizeText(raw["care.level"]));
-  if (raw["care.mobility"]) plan.care.mobility = fromCsv(redact(raw["care.mobility"], known));
-  if (raw["care.weekly"]) plan.care.weekly = fromCsv(parseWeekly(raw["care.weekly"]));
+  if (raw["care.level"]) setField(plan, "care.level", normalizeText(raw["care.level"]), source);
+  if (raw["care.weekly"]) setField(plan, "care.weekly", parseWeekly(raw["care.weekly"]), source);
+  for (const path of TEXT_FIELDS) {
+    if (raw[path]) setField(plan, path, redact(raw[path], known), source);
+  }
 
-  return { identity, plan, notes: raw.notes ?? "" };
+  return { identity, plan, notes: raw.notes ?? "", people: [] };
 }
 
 export function serviceGaps(plan) {
@@ -74,8 +81,6 @@ export function planForClaude(plan) {
   if (copy.care.weekly.value) delete copy.care.weekly.value.unread;
   return copy;
 }
-
-const getAt = (obj, path) => path.split(".").reduce((o, k) => o?.[k], obj);
 
 // 書き取りの結果を計画に入れる。人が直した欄は上書きせず、尋ねるために返す
 export function applyUpdates(plan, updates, memoId) {
@@ -106,4 +111,29 @@ export function editField(plan, path, value) {
   Object.assign(target, text === ""
     ? { value: null, status: "undecided", source: null, memoId: null }
     : { value: text, status: "filled", source: "human", memoId: null });
+}
+
+// 続き用ファイル。本人を特定する情報を含むので、書き出した人の責任で扱う
+export function toResumeFile({ identity, plan, notes, people }) {
+  return { kind: "hinan-hanashi-resume", version: 1, identity, plan, notes, people };
+}
+
+function mergeShape(base, loaded) {
+  if (Array.isArray(base)) return Array.isArray(loaded) ? loaded : base;
+  if (base === null || typeof base !== "object") return loaded ?? base;
+  const out = {};
+  for (const key of Object.keys(base)) out[key] = key in (loaded ?? {}) ? mergeShape(base[key], loaded[key]) : base[key];
+  return out;
+}
+
+export function fromResumeFile(data) {
+  if (data?.kind !== "hinan-hanashi-resume" || data.version !== 1) throw new Error("続き用ファイルではありません");
+  const plan = mergeShape(createPlan(), data.plan);
+  // 値の欄は mergeShape が null 既定で落とさないよう、読み込んだものを優先する
+  for (const path of ["care", "home", "evacuation"]) {
+    for (const key of Object.keys(plan[path])) if (data.plan?.[path]?.[key]) plan[path][key] = data.plan[path][key];
+  }
+  for (const key of ["timeBands", "contactMeans", "carry"]) if (data.plan?.[key]) plan[key] = data.plan[key];
+  for (const key of ["hazards", "considerations"]) if (data.plan?.[key]?.items) plan[key].items = data.plan[key].items;
+  return { identity: data.identity ?? {}, plan, notes: data.notes ?? "", people: Array.isArray(data.people) ? data.people : [] };
 }

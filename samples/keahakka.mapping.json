@@ -11,5 +11,11 @@
   "緊急連絡先氏名": "emergency.name",
   "緊急連絡先TEL": "emergency.phone",
   "歩行": "care.mobility",
+  "階段": "care.stairs",
+  "聞こえ": "care.hearing",
+  "普段の部屋": "home.usualRoom",
+  "寝室": "home.bedroom",
+  "同居": "care.household",
+  "危険個所": "home.hazardNote",
   "備考": "notes"
 }

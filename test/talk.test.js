@@ -34,6 +34,19 @@ test("火・木の話から入れる順で、きっかけが1つずつ出る", (
   assert.equal(nextTopic(plan, { gaps, skipped: ["hazards", "place", "means", "time"] }).text, "火・木の昼は、どう過ごしていますか？");
 });
 
+test("寝室が分かっていれば聞き直さない", () => {
+  const { plan } = okano();
+  assert.match(nextTopic(plan, {}).text, /家の裏の部屋で寝ていらっしゃる/);
+  plan.home.bedroom.value = null;
+  assert.equal(nextTopic(plan, {}).text, "大雨の夜は、いつもどの部屋で寝ていますか？");
+});
+
+test("持ち出しは要点だけが入る", () => {
+  const { plan } = okano();
+  applyUpdates(plan, mockScribe(MEMOS[7]), 1);
+  assert.equal(plan.carry.value, "血圧の薬と補聴器の電池（玄関の袋）");
+});
+
 test("台本どおりに話すと、段取りが埋まり、石段の割り込みが出る", () => {
   const { plan } = okano();
   const gaps = serviceGaps(plan);

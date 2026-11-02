@@ -4,6 +4,9 @@ export function mockScribe(memo) {
   const updates = [];
   const set = (path, value) => updates.push({ path, value });
   if (/崖|土砂/.test(memo)) set("hazards.items", "土砂");
+  const bedroom = memo.match(/([^。、]*の部屋)で寝ている/);
+  if (bedroom) set("home.bedroom", bedroom[1]);
+  if (/火.?木/.test(memo)) set("home.aloneHours", "火・木の日中");
   if (/ほかの災害は心配していない/.test(memo)) set("hazards.noOthers", true);
   if (/公民館/.test(memo)) set("evacuation.place", "ハッカ村公民館");
   if (/小学校/.test(memo)) set("evacuation.place", "ハッカ村小学校");
@@ -21,7 +24,10 @@ export function mockScribe(memo) {
     });
   }
   if (/固定電話/.test(memo)) set("contactMeans", /だけ|のみ/.test(memo) ? "固定電話のみ" : "固定電話");
-  if (/薬|電池/.test(memo) && /袋|持って/.test(memo)) set("carry", memo);
+  if (/薬|電池/.test(memo) && /袋|持って/.test(memo)) {
+    const bag = memo.match(/^(.+?)を、?(.+?)に/);
+    set("carry", bag ? `${bag[1]}（${bag[2]}）` : memo.split("。")[0]);
+  }
   if (/補聴器/.test(memo)) set("considerations.items", "補聴器");
   if (/ほかに配慮することはない/.test(memo)) set("considerations.noOthers", true);
   return updates;

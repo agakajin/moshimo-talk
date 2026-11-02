@@ -11,6 +11,12 @@ const RULES = [
   [/連絡先|電話|TEL/i, "self.phone"],
   [/介護度|要介護|認定/, "care.level"],
   [/週間|予定|サービス/, "care.weekly"],
+  [/階段/, "care.stairs"],
+  [/聞こえ|聴覚/, "care.hearing"],
+  [/普段.*部屋|居室/, "home.usualRoom"],
+  [/寝室|就寝/, "home.bedroom"],
+  [/同居|世帯|家族/, "care.household"],
+  [/危険|環境/, "home.hazardNote"],
   [/歩行|移動|ADL/i, "care.mobility"],
   [/備考|メモ|特記/, "notes"],
 ];
