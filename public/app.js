@@ -2,7 +2,7 @@
 import { decodeCsv, parseCsv } from "/core/csv.js";
 import { maskTable } from "/core/mask.js";
 import { findLeaks } from "/core/redact.js";
-import { importRow, serviceGaps } from "/core/plan.js";
+import { fromResumeFile, importRow, serviceGaps } from "/core/plan.js";
 import { startTalk } from "/talk.js";
 
 const TARGETS = {
@@ -16,6 +16,12 @@ const TARGETS = {
   "care.level": "要介護度",
   "care.weekly": "週間のサービス予定",
   "care.mobility": "歩き方",
+  "care.stairs": "階段の昇り降り",
+  "care.hearing": "聞こえ方",
+  "care.household": "同居の有無",
+  "home.usualRoom": "普段いる部屋",
+  "home.bedroom": "寝室",
+  "home.hazardNote": "家の中と周辺の危険個所",
   "emergency.name": "緊急連絡先の氏名",
   "emergency.phone": "緊急連絡先の電話",
   notes: "備考（Claude に送らない）",
@@ -41,6 +47,23 @@ const el = (tag, props = {}, ...children) => {
 const showError = (node, message) => { node.textContent = message; node.hidden = !message; };
 
 const state = { table: null, masked: null, results: null };
+
+const MANUAL_FIELDS = [
+  ["self.name", "氏名"], ["self.kana", "ふりがな"], ["self.birth", "生年月日"], ["self.gender", "性別"],
+  ["self.address", "住所"], ["self.phone", "本人の電話"], ["emergency.name", "緊急連絡先の氏名"], ["emergency.phone", "緊急連絡先の電話"],
+  ["care.level", "要介護度"], ["care.weekly", "週のサービス（例：デイサービス 月水金 9:00-16:00）"],
+  ["care.mobility", "歩き方、移動の方法"], ["care.stairs", "階段の昇り降り"], ["care.hearing", "聞こえ方、見え方"],
+  ["home.usualRoom", "普段いる部屋"], ["home.bedroom", "寝室"], ["care.household", "同居の有無"], ["home.hazardNote", "家の中と周辺の危険個所"],
+];
+
+function beginTalk(imported, options = {}) {
+  state.imported = imported;
+  for (const id of ["step1", "step2", "step3", "step4", "manual"]) $(id).hidden = true;
+  document.querySelector(".steps").hidden = true;
+  document.querySelector(".top h1").textContent = "訪問";
+  document.querySelector(".top p").textContent = "話を聞いて、段取りと次の一歩を決めます。決めるのはご本人です。";
+  startTalk(imported, options);
+}
 
 function goTo(step) {
   for (let i = 1; i <= 4; i++) {
@@ -165,6 +188,12 @@ function renderResult({ identity, plan, notes }) {
     ["電話", identity["self.phone"]],
     ["要介護度", plan.care.level.value],
     ["歩き方", plan.care.mobility.value],
+    ["階段", plan.care.stairs.value],
+    ["聞こえ方", plan.care.hearing.value],
+    ["普段いる部屋", plan.home.usualRoom.value],
+    ["寝室", plan.home.bedroom.value],
+    ["同居", plan.care.household.value],
+    ["危険個所", plan.home.hazardNote.value],
     ["緊急連絡先", identity["emergency.name"]],
     ["備考", notes],
   ].filter(([, v]) => v);
@@ -220,11 +249,44 @@ document.querySelectorAll("[data-sample]").forEach((b) => b.addEventListener("cl
 }));
 $("send").addEventListener("click", sendColumns);
 $("confirm").addEventListener("click", confirmMapping);
-$("startTalk").addEventListener("click", () => {
-  for (const id of ["step1", "step2", "step3", "step4"]) $(id).hidden = true;
-  document.querySelector(".steps").hidden = true;
-  document.querySelector(".top h1").textContent = "訪問";
-  document.querySelector(".top p").textContent = "話を聞いて、段取りと次の一歩を決めます。決めるのはご本人です。";
-  startTalk(state.imported);
+$("startTalk").addEventListener("click", () => beginTalk(state.imported));
+
+$("manualForm").append(...MANUAL_FIELDS.map(([key, label]) => el("label", { className: "field-label" }, label, el("input", { className: "plan-input", name: key }))));
+$("manualStart").addEventListener("click", () => {
+  $("manual").hidden = false;
+  $("manual").scrollIntoView({ behavior: "smooth", block: "nearest" });
 });
+$("manualForm").addEventListener("submit", (e) => e.preventDefault());
+$("manualGo").addEventListener("click", () => {
+  const form = new FormData($("manualForm"));
+  const headers = MANUAL_FIELDS.map(([key]) => key);
+  const mapping = Object.fromEntries(headers.map((h) => [h, h]));
+  beginTalk(importRow({ headers, row: headers.map((h) => String(form.get(h) ?? "")), mapping, source: "human" }));
+});
+$("resume").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    beginTalk(fromResumeFile(JSON.parse(await file.text())));
+  } catch (err) {
+    showError($("fileError"), `読み込めませんでした。${err.message}`);
+  }
+});
+$("quickStart").addEventListener("click", async () => {
+  const [bytes, mapping, script] = await Promise.all([
+    fetch("/samples/keahakka_okano.csv").then((r) => r.arrayBuffer()),
+    fetch("/samples/keahakka.mapping.json").then((r) => r.json()),
+    fetch("/samples/okano.script.json").then((r) => r.json()),
+  ]);
+  const table = parseCsv(decodeCsv(new Uint8Array(bytes)));
+  beginTalk(importRow({ headers: table.headers, row: table.rows[0], mapping }), { script });
+});
+fetch("/api/config").then((r) => r.json()).then(({ publicDemo }) => {
+  if (!publicDemo) return;
+  // 公開デモでは実在のデータが入らないよう、架空のサンプルだけにする
+  $("file").closest("label").hidden = true;
+  $("resume").closest("label").hidden = true;
+  $("manualStart").hidden = true;
+}).catch(() => {});
 goTo(1);

@@ -2,9 +2,14 @@
 import { applyUpdates, editField, planForClaude, serviceGaps } from "/core/plan.js";
 import { findLeaks, redact } from "/core/redact.js";
 import { nextTopic, REQUEST_NOTE } from "/core/talk.js";
+import { startWrap } from "/wrap.js";
 
 const FIELDS = [
   ["hazards.items", "心配な災害"],
+  ["home.bedroom", "寝室"],
+  ["home.usualRoom", "普段いる部屋"],
+  ["home.aloneHours", "ひとりになる時間帯"],
+  ["home.community", "自治会名"],
   ["evacuation.place", "逃げる先"],
   ["evacuation.means", "手段"],
   ["evacuation.route", "道のり"],
@@ -16,8 +21,11 @@ const FIELDS = [
   ["considerations.items", "配慮すること"],
   ["care.level", "要介護度"],
   ["care.mobility", "歩き方"],
+  ["care.stairs", "階段の昇り降り"],
+  ["care.hearing", "聞こえ方"],
+  ["care.household", "同居の有無"],
 ];
-const SOURCE = { csv: "CSV から", voice: "声メモから", human: "人が直した" };
+const SOURCE = { csv: "CSV から", voice: "声メモから", human: "人が入れた" };
 const WEEK = ["月", "火", "水", "木", "金", "土", "日"];
 
 const $ = (id) => document.getElementById(id);
@@ -35,8 +43,13 @@ async function post(url, body) {
   return data;
 }
 
-export function startTalk({ identity, plan }) {
+export function startTalk(state, { script = null } = {}) {
+  const { identity, plan } = state;
+  state.people ??= [];
   const gaps = serviceGaps(plan);
+  let scriptIndex = 0;
+  let config = null;
+  fetch("/samples/hakka-village.config.json").then((r) => r.json()).then((c) => { config = c; });
   const skipped = [];
   const shownInterrupts = new Set();
   let findings = [];
@@ -51,6 +64,11 @@ export function startTalk({ identity, plan }) {
   ];
   // 性別は「女」など一般の言葉なので、漏れの検査の対象にしない
   const secrets = Object.entries(identity).filter(([k]) => k !== "self.gender").map(([, v]) => v).filter(Boolean);
+  for (const p of state.people) {
+    known.unshift({ value: p.name, alias: p.alias });
+    secrets.push(p.name);
+    if (p.phone) secrets.push(p.phone);
+  }
 
   $("talk").hidden = false;
   renderAll();
@@ -202,14 +220,31 @@ export function startTalk({ identity, plan }) {
   $("addPerson").addEventListener("click", () => {
     const name = $("personName").value.trim();
     const alias = $("personAlias").value.trim();
+    const phone = $("personPhone").value.replace(/\D/g, "");
     if (!name || !alias) return;
     known.unshift({ value: name, alias });
     secrets.push(name);
+    if (phone) secrets.push(phone);
+    state.people.push({ name, alias, phone });
+    const helper = plan.helpers.find((h) => h.alias === alias);
+    if (helper) helper.asked = true;
+    else plan.helpers.push({ alias, awayWeekdayDaytime: false, asked: true, memoId: null });
+    renderPlan();
     // 名前は画面の中だけ。呼び名で一覧に出す
     $("people").append(el("li", { textContent: `${alias}：入力ずみ` }));
     $("personName").value = "";
     $("personAlias").value = "";
+    $("personPhone").value = "";
   });
+  $("nextMemo").hidden = !script;
+  $("nextMemo").addEventListener("click", async () => {
+    if (!script || scriptIndex >= script.length) return;
+    $("memo").value = script[scriptIndex];
+    scriptIndex += 1;
+    $("nextMemo").hidden = scriptIndex >= script.length;
+    await addMemo();
+  });
+  $("goWrap").addEventListener("click", () => startWrap(state, findings, config));
   $("skip").addEventListener("click", () => {
     if (interrupt) {
       plan.nextSteps.push({ topic: interrupt.id, text: interrupt.opener });

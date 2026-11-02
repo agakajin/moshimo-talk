@@ -28,11 +28,23 @@
         <label class="button primary">CSV を選ぶ
           <input id="file" type="file" accept=".csv,text/csv" hidden>
         </label>
+        <button id="manualStart" class="button">CSV なしで始める</button>
+        <label class="button">続きから
+          <input id="resume" type="file" accept=".json,application/json" hidden>
+        </label>
         <span class="or">架空のデータで試す</span>
+        <button id="quickStart" class="button primary">岡野さんで、すぐ試す</button>
         <button class="button" data-sample="keahakka_okano.csv">岡野ハルさん</button>
         <button class="button" data-sample="keahakka_yoshikawa.csv">𠮷川正一さん</button>
       </div>
       <p id="fileError" class="error" role="alert" hidden></p>
+    </section>
+
+    <section id="manual" class="panel" hidden>
+      <h2>手元で分かることだけ入れてください</h2>
+      <p class="hint">全部埋めなくて大丈夫です。国のアセスメント項目のうち、避難に関わるものだけです。名前や連絡先は Claude に送りません。</p>
+      <form id="manualForm" class="manual-grid"></form>
+      <div class="row"><button id="manualGo" class="button primary">話に進む</button></div>
     </section>
 
     <section id="step2" class="panel" hidden>
@@ -88,7 +100,11 @@
       <div class="panel opener" aria-live="polite">
         <p id="openerLabel" class="label">話のきっかけ</p>
         <p id="opener" class="opener-text"></p>
-        <div class="row"><button id="skip" class="button">今は聞けない</button></div>
+        <div class="row">
+          <button id="skip" class="button">今は聞けない</button>
+          <button id="nextMemo" class="button" hidden>台本の次の声メモを入れる</button>
+          <button id="goWrap" class="button primary">帰る前へ</button>
+        </div>
       </div>
       <p id="talkMode" class="notice" hidden></p>
       <div class="talk-grid">
@@ -106,6 +122,7 @@
           <div class="row">
             <input id="personName" class="plan-input short" placeholder="名前" aria-label="名前">
             <input id="personAlias" class="plan-input short" placeholder="呼び名（例：隣の人）" aria-label="呼び名">
+            <input id="personPhone" class="plan-input short" placeholder="電話（任意）" aria-label="電話">
             <button id="addPerson" class="button">入れる</button>
           </div>
           <ul id="people" class="people"></ul>
@@ -126,6 +143,44 @@
         <div id="requests"></div>
         <h3>気になること</h3>
         <ul id="findings"></ul>
+      </div>
+    </section>
+    <section id="wrap" hidden>
+      <div class="panel">
+        <h2>今日できたこと</h2>
+        <ul id="doneList"></ul>
+        <h3>頼めましたか</h3>
+        <div id="askedList"></div>
+        <h2 class="gap-top">次の一歩</h2>
+        <ul id="nextList"></ul>
+        <div class="row"><button id="backToTalk" class="button">話に戻る</button></div>
+      </div>
+
+      <div class="panel">
+        <h2>本人の1枚</h2>
+        <p class="hint">手伝う人が決まっていなくても渡せます。</p>
+        <article id="sheet" class="sheet">
+          <h3 id="sheetName"></h3>
+          <p id="sheetKana" class="hint"></p>
+          <dl id="sheetRows"></dl>
+          <div id="sheetRequestsBox"><h4>お願いしたいこと</h4><ul id="sheetRequests"></ul></div>
+          <div id="sheetNotes" class="sheet-notes"></div>
+        </article>
+        <div class="row"><button id="print" class="button primary">印刷する</button></div>
+      </div>
+
+      <div class="panel">
+        <h2>市に渡すもの</h2>
+        <p class="notice">架空の村の決まりです。実際の同意の取り方と渡し方は、市の条例と法律の確認が必要です。同意は紙で確かめ、ここには結果だけ記録します。</p>
+        <h3>項目ごとの同意</h3>
+        <div id="consentRows"></div>
+        <p id="csvBlocked" class="hint">同意した項目がないので、市向けの CSV は出ません。本人の1枚はこのまま渡せます。</p>
+        <details open><summary>出す内容を確かめる</summary><div class="scroll"><table id="csvPreview"></table></div></details>
+        <div class="row">
+          <button id="csvDownload" class="button primary">市向けの CSV を保存</button>
+          <button id="resumeDownload" class="button">続き用ファイルを保存</button>
+        </div>
+        <p class="hint">続き用ファイルには名前や連絡先が入ります。保存した人の責任で扱ってください。画面を閉じると、この画面の内容は消えます。</p>
       </div>
     </section>
   </main>
