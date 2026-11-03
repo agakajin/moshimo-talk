@@ -52,9 +52,19 @@
       <li data-step="5">話すことが残る</li>
     </ol>
 
+    <section id="roleAsk" class="panel role-ask">
+      <h2>あなたは？</h2>
+      <div class="role-choices">
+        <button class="button" type="button" data-role-choice="care">ケアマネジャー</button>
+        <button class="button" type="button" data-role-choice="minsei">民生委員</button>
+        <button class="button" type="button" data-role-choice="other">そのほか（全部見る）</button>
+      </div>
+      <p class="hint role-note">選んだ方に要るものだけを画面に出します。あとから変えられます。</p>
+    </section>
+
     <section id="step1" class="panel">
-      <h2>つなぎたいデータを2つ入れる</h2>
-      <p class="hint">ファイルはこの画面の中で読みます。この時点では、どこにも送りません。片方だけでも始められます。</p>
+      <h2 id="step1Title">つなぎたいデータを2つ入れる</h2>
+      <p id="step1Hint" class="hint">ファイルはこの画面の中で読みます。この時点では、どこにも送りません。片方だけでも始められます。</p>
       <div class="slots">
         <div id="slotCare" class="slot" data-slot="care">
           <h3>ケアプラン</h3>
@@ -105,9 +115,9 @@
         <label class="button">続きから
           <input id="resume" type="file" accept=".json,application/json" hidden>
         </label>
-        <span class="or">台本つきで試す</span>
-        <button id="quickStart" class="button" data-quick="okano">岡野さん</button>
-        <button id="quickStartB" class="button" data-quick="yoshikawa">𠮷川さん</button>
+        <span class="or care-only">台本つきで試す</span>
+        <button id="quickStart" class="button care-only" data-quick="okano">岡野さん</button>
+        <button id="quickStartB" class="button care-only" data-quick="yoshikawa">𠮷川さん</button>
       </div>
     </section>
 
@@ -166,6 +176,7 @@
         <span id="formatWhoNote" class="hint who-note"></span>
       </div>
       <p id="formatLegend" class="flow-legend"></p>
+      <div id="flowTabs" class="tabs" role="group" aria-label="列の分け方"></div>
       <div id="formatTable" class="flow-groups"></div>
       <p id="formatBackNote" class="hint" hidden>⇄ 訪問で変わった欄は、同意があれば訪問終了でケアプランにも戻せます。</p>
       <p id="formatError" class="error" role="alert" hidden></p>
@@ -287,10 +298,14 @@
         <div id="askedList"></div>
         <h2 class="gap-top">次の一歩</h2>
         <ul id="nextList"></ul>
-        <div class="row"><button id="backToTalk" class="button primary">話に戻る</button><button id="wrapFormat" class="button">様式を変える</button></div>
+        <div class="row"><button id="backToTalk" class="button primary">話に戻る</button><button id="wrapFormat" class="button">様式を変える</button><button id="resumeDownload" class="button">続き用ファイルを保存</button></div>
+        <p class="hint gap-small">続き用ファイルには名前や連絡先、体のこと、欄に入らなかった声メモの文字が入ります。保存した人の責任で扱ってください。画面を閉じると、この画面の内容は消えます。</p>
+      </div>
       </div>
 
-      <div class="panel">
+      <div class="wrap-col">
+      <div id="wrapTabs" class="tabs" role="group" aria-label="渡す相手"></div>
+      <div id="sheetPanel" class="panel">
         <h2>本人の1枚</h2>
         <p class="hint">手伝う人が決まっていなくても渡せます。</p>
         <article id="sheet" class="sheet">
@@ -303,9 +318,7 @@
         <div class="row"><button id="print" class="button primary">印刷する</button></div>
       </div>
 
-      </div>
-      <div class="wrap-col">
-      <div class="panel">
+      <div id="cityPanel" class="panel">
         <h2 id="outputTitle">市に渡す個別避難計画書</h2>
         <p class="notice">架空の決まりです。実際の同意の取り方と渡し方は、市の条例と法律の確認が必要です。同意は紙で確かめ、ここには結果だけ記録します。</p>
         <p id="requiredList" class="required-note" hidden></p>
@@ -319,9 +332,7 @@
         <details open><summary>出す内容を確かめる</summary><div class="scroll"><table id="csvPreview"></table></div></details>
         <div class="row">
           <button id="csvDownload" class="button primary">個別避難計画書の CSV を保存</button>
-          <button id="resumeDownload" class="button">続き用ファイルを保存</button>
         </div>
-        <p class="hint">続き用ファイルには名前や連絡先、体のこと、欄に入らなかった声メモの文字が入ります。保存した人の責任で扱ってください。画面を閉じると、この画面の内容は消えます。</p>
         <p id="outsideList" class="notice" hidden></p>
       </div>
 

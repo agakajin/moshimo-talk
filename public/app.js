@@ -158,7 +158,8 @@ async function takeFiles(key, files) {
     return;
   }
   const other = key === "care" ? "plan" : "care";
-  const list = [...files].slice(0, 2);
+  // 民生委員の画面にケアプランの枠は無いので、2つ目を見えない枠へ入れない
+  const list = [...files].slice(0, document.body.dataset.role === "minsei" ? 1 : 2);
   const wrong = list.find((f) => !/\.csv$/i.test(f.name));
   if (wrong) {
     showError($("fileError"), `${wrong.name} は CSV ではありません。CSV を入れてください。`);
@@ -180,6 +181,7 @@ function connect() {
   state.links = {};
   state.rowIndex = 0;
   state.whoChosen = undefined;
+  state.flowTab = null;
   if (care) {
     loadCare(care.table);
     return;
@@ -501,6 +503,9 @@ const FLOW_GROUPS = [
   ["none", "空のまま出す列", ""],
   ["left", "ケアプランだけの列（計画書には渡しません）", ""],
 ];
+const FLOW_TABS = [["check", "確かめる"], ["linked", "つながっている"], ["talk", "訪問で聞く"], ["rest", "そのほか"]];
+// 値が違う列と選んでほしい列を「確かめる」に集める
+const tabOf = ({ kind, differs }) => (kind === "unknown" || differs ? "check" : kind === "care" || kind === "plan" ? "linked" : kind === "talk" || kind === "hand" ? "talk" : "rest");
 const FLOW_PLAIN = { unknown: "選んでください", talk: "訪問で聞く", hand: "手元の情報に手で入れる", none: "入れません", keep: "ケアプランの番号は移しません", auto: "作成した日" };
 
 // 列をつなぐ画面。左はケアプランの列と値、右は個別避難計画書の列と値
@@ -551,10 +556,30 @@ function renderFlows() {
     el("span", { className: "legend-gap", textContent: "／" }),
     el("b", { textContent: "右：個別避難計画書の列と値" }), planName ? `（${planName}）` : "");
 
-  const open = (kind) => all.filter((r) => r.kind === kind);
-  $("formatTable").replaceChildren(...FLOW_GROUPS.filter(([kind]) => open(kind).length > 0).map(([kind, title]) => el("section", { className: `flow-group kind-${kind}` },
-    el("h3", { className: "flow-head" }, title, el("small", { textContent: `${open(kind).length}列` })),
-    el("div", { className: "flow-list" }, ...open(kind).map((row) => flowRow(row, valueOf, columns))))));
+  // タブごとに列を分ける。はじめは確かめるところだけを出す。「そのほか」の方は全部を並べる
+  const everything = document.body.dataset.role === "other";
+  // 直した列が別のタブへ移ったら、その列が見えるタブへ移る
+  const followed = state.flowFollow && all.find((r) => `${r.leftOnly ? "care" : "plan"}:${r.header}` === state.flowFollow);
+  if (followed) state.flowTab = tabOf(followed);
+  state.flowFollow = null;
+  state.flowTab ??= "check";
+  $("flowTabs").hidden = everything;
+  $("flowTabs").replaceChildren(...FLOW_TABS.map(([key, label]) => {
+    const button = el("button", { className: `tab${key === state.flowTab ? " current" : ""}`, type: "button" }, label, el("small", { textContent: `${all.filter((r) => tabOf(r) === key).length}列` }));
+    button.setAttribute("aria-pressed", String(key === state.flowTab));
+    button.addEventListener("click", () => {
+      state.flowTab = key;
+      renderFlows();
+    });
+    return button;
+  }));
+  const visible = everything ? all : all.filter((r) => tabOf(r) === state.flowTab);
+  const inGroup = (row, kind) => (kind === "differs" ? row.kind === "care" && row.differs : row.kind === kind && !(kind === "care" && row.differs));
+  const groups = [["differs", "値が違う列"], ...FLOW_GROUPS].filter(([kind]) => visible.some((r) => inGroup(r, kind)));
+  const empty = visible.length === 0 ? [el("p", { className: "tab-empty", textContent: "確かめるところはありません。このまま進めます。" })] : [];
+  $("formatTable").replaceChildren(...empty, ...groups.map(([kind, title]) => el("section", { className: `flow-group kind-${kind === "differs" ? "care" : kind}` },
+    el("h3", { className: "flow-head" }, title, el("small", { textContent: `${visible.filter((r) => inGroup(r, kind)).length}列` })),
+    el("div", { className: "flow-list" }, ...visible.filter((r) => inGroup(r, kind)).map((row) => flowRow(row, valueOf, columns))))));
 
   // 計画書のファイルをつないでいるときは、別の様式を選ぶと値が使えないので、選ぶところを出さない
   $("formatChoices").hidden = Boolean(data);
@@ -617,6 +642,7 @@ function flowRow(row, valueOf, columns) {
       }
     }
     state.formatOpen.add(key);
+    state.flowFollow = key;
     refreshDraft();
     renderFormatWho();
     renderFlows();
@@ -713,12 +739,16 @@ async function confirmFormat() {
   const unknown = columns.find((c) => c.target === "unknown");
   if (unknown) {
     showError($("formatError"), `「${unknown.header}」に入れる内容を選んでください。分からなければ「空のまま出す」を選べます。`);
+    state.flowTab = "check";
+    renderFlows();
     return;
   }
   if (!state.backToTalk && state.table) {
     const { mapping, error } = buildMapping({ strict: true });
     if (error) {
       showError($("formatError"), error);
+      state.flowTab = "check";
+      renderFlows();
       return;
     }
     state.mapping = mapping;
@@ -903,6 +933,21 @@ $("swapSlots").addEventListener("click", () => {
   state.slots = { care: plan, plan: care };
   renderSlots();
 });
+// 使う人を選ぶと、その人に要るものだけを出す
+function chooseRole(role) {
+  document.body.dataset.role = role;
+  document.querySelectorAll("[data-role-choice]").forEach((b) => b.classList.toggle("primary", b.dataset.roleChoice === role));
+  const minsei = role === "minsei";
+  // 民生委員の画面では見えないケアプランを残さない
+  if (minsei) state.slots.care = null;
+  $("step1Title").textContent = minsei ? "個別避難計画書があれば入れてください" : "つなぎたいデータを2つ入れる";
+  $("step1Hint").textContent = minsei
+    ? "ファイルはこの画面の中で読みます。この時点では、どこにも送りません。無ければ「CSV なしで始める」で、分かることだけ入れて始められます。"
+    : "ファイルはこの画面の中で読みます。この時点では、どこにも送りません。片方だけでも始められます。";
+  showError($("fileError"), "");
+  renderSlots();
+}
+document.querySelectorAll("[data-role-choice]").forEach((b) => b.addEventListener("click", () => chooseRole(b.dataset.roleChoice)));
 $("connect").addEventListener("click", connect);
 const backToStart = () => {
   columnsRequest += 1;

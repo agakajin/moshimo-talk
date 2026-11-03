@@ -264,6 +264,34 @@ body:not(.home) #hero, body.home .top, body.home .steps { display: none; }
 .kind-plan { --kind: #2b5c9e; --kind-soft: #e6eef8; }
 .kind-talk { --kind: var(--warn); --kind-soft: var(--warn-soft); }
 .kind-hand, .kind-auto, .kind-keep, .kind-none, .kind-left { --kind: var(--muted); --kind-soft: var(--ground); }
+/* 最初に使う人を聞く。選ぶまでデータを入れる枠は出さない */
+.role-ask h2 { margin-bottom: 8px; }
+.role-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.role-choices .button { font-weight: 600; }
+.role-note { margin: 8px 0 0; }
+body:not([data-role]) #step1, body:not([data-role]) #manual { display: none; }
+/* 選んだあとは入れる枠が主役。流れの図を畳み、枠を1画面に収める */
+body[data-role] .hero-flow, body[data-role] .hero-note, body[data-role] .role-note { display: none; }
+body[data-role] .role-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 24px; }
+body[data-role] .role-ask h2 { margin: 0; font-size: 16px; }
+body:not(.home) #roleAsk { display: none; }
+body[data-role="minsei"] #slotCare, body[data-role="minsei"] .slot-link, body[data-role="minsei"] .care-only { display: none; }
+body[data-role="minsei"] .slots { grid-template-columns: minmax(0, 1fr); }
+
+/* タブ。列をつなぐ画面と訪問終了で同じ形にする */
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; border-bottom: 2px solid var(--line); }
+.tab { margin-bottom: -2px; padding: 8px 16px; border: 2px solid transparent; border-radius: 8px 8px 0 0; background: none; color: var(--muted); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+.tab:hover { color: var(--ink); }
+.tab.current { border-color: var(--line); border-bottom-color: var(--paper); background: var(--paper); color: var(--accent); }
+.tab small { margin-left: 4px; font-size: 13px; font-weight: 400; }
+.tab:focus-visible { outline: 3px solid #7fb9ad; outline-offset: 2px; }
+.tab-off { display: none; }
+.tab-empty { margin: 8px 0 16px; color: var(--muted); }
+.gap-small { margin-top: 10px; margin-bottom: 0; }
+#wrapTabs { border-bottom: 0; margin-bottom: 0; }
+#wrapTabs .tab.current { border-bottom-color: var(--line); background: var(--paper); }
+@media print { .tab-off:has(#sheet) { display: block; } }
+
 /* 列をつなぐ：左はケアプランの列と値、右は個別避難計画書の列と値 */
 .flow-legend { margin: 0 0 10px; padding: 6px 12px; border-radius: 8px; background: var(--ground); font-size: 14px; }
 .legend-care { color: var(--accent); }

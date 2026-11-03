@@ -185,6 +185,35 @@ export function startWrap(state, findings, config) {
   renderOutside();
   renderRequired();
   renderInput();
+  renderWrapTabs();
+
+  // 渡す相手ごとにタブで分ける。「そのほか」は全部を並べる。同意は各タブの中にそのまま出す
+  function renderWrapTabs() {
+    const role = document.body.dataset.role;
+    const tabs = [
+      ["sheet", "ご本人へ", "sheetPanel"],
+      // 民生委員はケアプランを持たないので出さない
+      ...(state.input && role !== "minsei" ? [["input", "ケアプランへ", "inputPanel"]] : []),
+      ["city", "市へ", "cityPanel"],
+    ];
+    const all = role === "other";
+    state.wrapTab = tabs.some(([key]) => key === state.wrapTab) ? state.wrapTab : "sheet";
+    $("wrapTabs").hidden = all;
+    $("wrapTabs").replaceChildren(...tabs.map(([key, label]) => {
+      const button = el("button", { className: `tab${key === state.wrapTab ? " current" : ""}`, type: "button", textContent: label });
+      button.setAttribute("aria-pressed", String(key === state.wrapTab));
+      button.addEventListener("click", () => {
+        state.wrapTab = key;
+        renderWrapTabs();
+      });
+      return button;
+    }));
+    const shown = new Set(tabs.map(([, , id]) => id));
+    for (const id of ["sheetPanel", "inputPanel", "cityPanel"]) {
+      const current = tabs.find(([key]) => key === state.wrapTab)?.[2];
+      $(id).classList.toggle("tab-off", !shown.has(id) || (!all && id !== current));
+    }
+  }
 
   $("print").onclick = () => { renderSheet(); window.print(); };
   $("csvDownload").onclick = () => download(`${config.name ?? "plan"}-plan.csv`, toCsvText(config.columns, csvRow()), "text/csv;charset=utf-8");
