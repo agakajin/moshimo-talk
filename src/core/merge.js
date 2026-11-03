@@ -39,6 +39,8 @@ export function mergeOutputRow(imported, { headers, row, targets, blankValue = "
   imported.fromOutput ??= [];
   imported.leftovers ??= [];
   const helpers = {};
+  // 違う値を見せるときの名前は、ケアプランの列名を優先する
+  const careLabel = new Map(Object.entries(imported.input?.mapping ?? {}).map(([h, t]) => [t, h]));
   headers.forEach((header, i) => {
     const target = targets[header];
     const value = cleanValue(row[i], blankValue);
@@ -63,21 +65,21 @@ export function mergeOutputRow(imported, { headers, row, targets, blankValue = "
         imported.identity[target] = parsed[target];
         result.filled.push({ label: header, value: parsed[target] });
       } else if (compact(current) !== compact(parsed[target])) {
-        result.conflicts.push({ key: target, label: header, current, incoming: parsed[target], local: true });
+        result.conflicts.push({ key: target, label: careLabel.get(target) ?? header, current, incoming: parsed[target], local: true });
       }
       return;
     }
     // 1列にまとめて書かれた文は分けられない。下の欄がすべて空のときだけ入れ、ほかは手元に残して見せる
     const roomy = { "considerations.all": ["considerations.items", ["care.mobility", "care.stairs", "care.hearing", "considerations.items"]], "hazards.all": ["hazards.items", ["hazards.items", "home.hazardNote"]] }[target];
     if (roomy && roomy[1].every((p) => getAt(imported.plan, p)?.status !== "filled")) {
-      fillField(imported, roomy[0], header, value, result);
+      fillField(imported, roomy[0], careLabel.get(roomy[0]) ?? header, value, result);
       return;
     }
     if (roomy || target === "evacuation.summary" || target === "evacuation.minutes") {
       imported.leftovers.push({ label: header, value });
       return;
     }
-    fillField(imported, target, header, value, result);
+    fillField(imported, target, careLabel.get(target) ?? header, value, result);
   });
   for (const number of Object.keys(helpers).sort()) addHelper(imported, helpers[number], number, result);
   return result;
@@ -114,7 +116,7 @@ function sameValue(target, a, b) {
 }
 
 // 渡す様式の列ごとに、値がどこから来るかを求める。input はケアプラン、planRow は計画書の選んだ行
-export function describeFlows({ columns, input = null, plan = null, planHeaders = [], planRow = null, blankValue = "未決定" }) {
+export function describeFlows({ columns, input = null, plan = null, customs = [], planHeaders = [], planRow = null, blankValue = "未決定" }) {
   const rows = columns.map(({ header, target }) => {
     if (target === "unknown") return { header, target, kind: "unknown", from: [] };
     if (target === "none") return { header, target, kind: "none", from: [] };
@@ -122,19 +124,20 @@ export function describeFlows({ columns, input = null, plan = null, planHeaders 
     const planAt = planHeaders.indexOf(header);
     const incoming = planRow && planAt >= 0 ? cleanValue(planRow[planAt], blankValue) : "";
     // 番号はケアプランの値とつながない。計画書にあるものだけをそのまま残す
-    if (target === "meta.serial") return { header, target, kind: "keep", from: incoming ? [{ header, value: incoming }] : [] };
+    if (target === "meta.serial") return { header, target, kind: "keep", from: incoming ? [{ header, value: incoming }] : [], incoming };
     const paths = expand(target);
     const from = (input?.headers ?? []).map((h, i) => ({ header: h, value: String(input.row[i] ?? "").trim(), target: input.mapping[h] }))
-      .filter((c) => c.value && (paths.includes(c.target) || (target === "new" && c.header === header && c.target?.startsWith("extra."))))
+      // 計画に無い欄は、つないだ計画書の列の名前を控えている
+      .filter((c) => c.value && (paths.includes(c.target) || (target === "new" && c.target?.startsWith("extra.") && (customs.find((x) => x.path === c.target)?.label ?? c.header) === header)))
       .map(({ header: h, value }) => ({ header: h, value }));
     // 訪問の途中で聞いた値は、もとの CSV より新しい
     const talked = plan ? paths.map((p) => getAt(plan, p)).filter((f) => f?.status === "filled" && ["voice", "human"].includes(f.source)).map((f) => String(f.value)) : [];
     if (talked.length > 0) return { header, target, kind: "talk", from: [], talked };
     if (from.length > 0) {
       const differs = incoming && from.length === 1 && !sameValue(target, from[0].value, incoming) ? incoming : null;
-      return { header, target, kind: "care", from, differs };
+      return { header, target, kind: "care", from, differs, incoming };
     }
-    if (incoming) return { header, target, kind: "plan", from: [{ header, value: incoming }] };
+    if (incoming) return { header, target, kind: "plan", from: [{ header, value: incoming }], incoming };
     return { header, target, kind: isIdentity(target) ? "hand" : "talk", from: [] };
   });
   const delivered = new Set(columns.flatMap(({ target }) => expand(target)));

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { decodeCsv, parseCsv } from "../src/core/csv.js";
-import { attachOutput, buildInputRow, DEFAULT_TARGETS, isOwnNumberColumn } from "../src/core/format.js";
+import { attachOutput, buildInputRow, DEFAULT_TARGETS, isOwnNumberColumn, planFieldList } from "../src/core/format.js";
 import { buildVillageRow } from "../src/core/output.js";
 import { chooseConflict, describeFlows, findPersonRow, mergeOutputRow, pendingRechecks } from "../src/core/merge.js";
 import { applyUpdates, fromResumeFile, importRow, planForClaude, toResumeFile } from "../src/core/plan.js";
@@ -109,7 +109,7 @@ test("手元の情報の違いも確かめられ、続き用ファイルに残�
   assert.deepEqual(conflicts.map((c) => c.key), ["self.phone"], "空白だけの違いは違う値としない");
   chooseConflict(imported, conflicts[0], "ask");
   assert.equal(imported.identity["self.phone"], "");
-  assert.equal(pendingRechecks(imported)[0].label, "電話番号");
+  assert.equal(pendingRechecks(imported)[0].label, "連絡先", "名前はケアプランの列名を優先する");
   const back = fromResumeFile(JSON.parse(JSON.stringify(toResumeFile(imported))));
   assert.equal(back.rechecks[0].key, "self.phone");
   assert.equal(pendingRechecks(back).length, 1);
@@ -155,6 +155,32 @@ test("訪問で聞いた値は、もとの CSV の値より先に見せる", () 
   const { rows } = describeFlows({ columns: [{ header: "歩行", target: "care.mobility" }], input: imported.input, plan: imported.plan });
   assert.equal(rows[0].kind, "talk");
   assert.deepEqual(rows[0].talked, ["車いす"]);
+});
+
+test("欄の名前はケアプランの列名を優先し、無ければ計画書の列名、どちらも無ければ基本の名前", () => {
+  const imported = importRow({ headers: ["歩行"], row: ["杖"], mapping: { 歩行: "care.mobility" } });
+  attachOutput(imported, { columns: [{ header: "歩き方の様子", target: "care.mobility" }, { header: "避難先", target: "evacuation.place" }] });
+  const label = (path) => planFieldList(imported).find((f) => f.path === path).label;
+  assert.equal(label("care.mobility"), "歩行");
+  assert.equal(label("evacuation.place"), "避難先");
+  assert.equal(label("hazards.items"), "心配な災害");
+});
+
+test("計画書の列につないだケアプランの列は、どの欄の値でも取り込む", () => {
+  const imported = importRow({ headers: ["自治会", "逃げる先"], row: ["ミドリ区", "公民館"], mapping: { 自治会: "home.community", 逃げる先: "evacuation.place" } });
+  assert.equal(imported.plan.home.community.value, "ミドリ区");
+  assert.equal(imported.plan.evacuation.place.value, "公民館");
+  assert.equal(imported.plan.evacuation.place.source, "csv");
+});
+
+test("計画に無い欄でつないだ列は、計画書の列と同じ欄になる", () => {
+  const imported = importRow({ headers: ["家の種類"], row: ["平屋"], mapping: { 家の種類: "new" } });
+  imported.customs[0].label = "住居の種類";
+  attachOutput(imported, { columns: [{ header: "住居の種類", target: "new" }] });
+  assert.equal(imported.customs.length, 1);
+  assert.equal(imported.output.targets.住居の種類, imported.customs[0].path);
+  const { rows } = describeFlows({ columns: [{ header: "住居の種類", target: "new" }], input: imported.input, customs: imported.customs });
+  assert.deepEqual(rows[0].from, [{ header: "家の種類", value: "平屋" }]);
 });
 
 test("番号の列だけを見分ける", () => {

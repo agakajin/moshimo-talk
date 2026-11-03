@@ -263,17 +263,15 @@ body:not(.home) #hero, body.home .top, body.home .steps { display: none; }
 .kind-care { --kind: var(--accent); --kind-soft: var(--accent-soft); }
 .kind-plan { --kind: #2b5c9e; --kind-soft: #e6eef8; }
 .kind-talk { --kind: var(--warn); --kind-soft: var(--warn-soft); }
-.kind-hand, .kind-auto, .kind-keep, .kind-none { --kind: var(--muted); --kind-soft: var(--ground); }
-/* 列を確かめる：左はケアプランにあったもの、右はこの道具の欄 */
-.flow-row.confirm-row { grid-template-columns: minmax(0, 1fr) 1.5em minmax(0, 1.1fr); }
-.flow-row.confirm-row select { grid-column: auto; }
-.flow-row.confirm-legend { border-left-color: transparent; background: none; font-size: 14px; }
-.confirm-legend .flow-arrow { color: var(--muted); }
-.confirm-from { color: var(--accent); }
-.confirm-to { color: var(--ink); }
-.confirm-from b, .confirm-to b { font-size: 15px; }
-.confirm-legend-second { display: none; }
-@media (min-width: 1100px) { .flow-row.confirm-legend-second { display: grid; } }
+.kind-hand, .kind-auto, .kind-keep, .kind-none, .kind-left { --kind: var(--muted); --kind-soft: var(--ground); }
+/* 列をつなぐ：左はケアプランの列と値、右は個別避難計画書の列と値 */
+.flow-legend { margin: 0 0 10px; padding: 6px 12px; border-radius: 8px; background: var(--ground); font-size: 14px; }
+.legend-care { color: var(--accent); }
+.legend-gap { margin: 0 8px; color: var(--muted); }
+.flow-to .flow-name { display: block; }
+.flow-to .value { display: block; color: var(--muted); font-size: 14px; font-weight: 400; }
+.flow-to .plain { color: var(--muted); font-size: 14px; font-weight: 400; }
+.mask-plan { margin-top: 12px; }
 .merge-conflict-note { margin: 0 0 6px; font-size: 14px; color: var(--muted); }
 .mask-all { margin-top: 10px; }
 .mask-original { overflow-wrap: anywhere; }

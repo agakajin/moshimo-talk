@@ -48,8 +48,7 @@
     <ol class="steps" aria-label="進み具合">
       <li data-step="1">データを入れる</li>
       <li data-step="2">送る中身を見る</li>
-      <li data-step="3">列を確かめる</li>
-      <li data-step="4">渡す様式を選ぶ</li>
+      <li data-step="4">列をつなぐ</li>
       <li data-step="5">話すことが残る</li>
     </ol>
 
@@ -125,6 +124,7 @@
       <div id="suspect" class="error" role="alert" hidden></div>
       <div class="scroll"><table id="maskTable"></table></div>
       <button id="maskAll" class="button mask-all" type="button" hidden></button>
+      <p id="maskPlanHeaders" class="hint mask-plan" hidden></p>
       <details>
         <summary>送る中身をそのまま見る</summary>
         <pre id="payloadRaw"></pre>
@@ -137,27 +137,15 @@
       <p id="sendError" class="error" role="alert" hidden></p>
     </section>
 
-    <section id="step3" class="panel" hidden>
-      <h2>列の読み取りを確かめる</h2>
+    <section id="step4" class="panel" hidden>
+      <h2>ケアプランと個別避難計画書の列をつなぐ</h2>
       <p id="modeNotice" class="notice" hidden></p>
-      <p class="hint">Claude が列の名前から読んだ結果です。違っていれば右の欄を選び直してください。値はこの画面の中だけで表示しています。</p>
+      <p class="hint">Claude が列の名前を読んで、同じ意味の列をつなぎました。違っていれば「直す」を押します。Claude が読むのは見出しだけで、値はこの画面の中だけで表示しています。</p>
       <div id="whoRow" class="row who" hidden>
         <label for="who">どの方の計画を作りますか</label>
         <select id="who"></select>
       </div>
-      <p id="confirmLegend" class="hint"></p>
-      <div id="confirmTable" class="flow-list"></div>
-      <p id="confirmError" class="error" role="alert" hidden></p>
-      <div class="row">
-        <button id="confirm" class="button primary">この内容で確定する</button>
-        <button id="confirmBack" class="button">戻る</button>
-      </div>
-    </section>
-
-    <section id="step4" class="panel" hidden>
-      <h2>個別避難計画書を、どの様式で渡しますか</h2>
-      <p class="hint">計画の欄は、ここで選んだ様式に合わせます。Claude が読むのは見出しだけです。計画書に入っている値は、この画面の中で計画に入れます。架空の様式です。</p>
-      <div class="row">
+      <div id="formatChoices" class="row">
         <button id="formatDefault" class="button">個別避難計画書（ハッカ村の様式）</button>
         <button id="formatMint" class="button">個別避難計画書（ミント市の様式）</button>
         <label class="button">様式の CSV を選ぶ
@@ -177,8 +165,8 @@
         <select id="formatWho"></select>
         <span id="formatWhoNote" class="hint who-note"></span>
       </div>
+      <p id="formatLegend" class="flow-legend"></p>
       <div id="formatTable" class="flow-groups"></div>
-      <p id="formatUnused" class="hint" hidden></p>
       <p id="formatBackNote" class="hint" hidden>⇄ 訪問で変わった欄は、同意があれば訪問終了でケアプランにも戻せます。</p>
       <p id="formatError" class="error" role="alert" hidden></p>
       <div class="row">

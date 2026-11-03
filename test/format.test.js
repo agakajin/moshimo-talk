@@ -80,7 +80,7 @@ test("欄に印が付く。両方にある欄は1つで、避難計画に入る�
   hakka(imported);
   const fields = planFieldList(imported);
   const of = (label) => fields.find((f) => f.label === label);
-  assert.equal(of("寝室の場所").mark, "両方");
+  assert.equal(of("寝室").mark, "両方", "両方にある欄はケアプランの列名で出す");
   assert.equal(of("避難場所").mark, "避難計画書のみ");
   assert.equal(fields.filter((f) => f.path === "home.bedroom").length, 1);
   assert.equal(of("知らせの受け方").mark, "様式の外");

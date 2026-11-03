@@ -58,8 +58,6 @@ export function setIdentity(identity, key, value) {
   identity[key] = normalized;
   return normalized;
 }
-const TEXT_FIELDS = ["care.mobility", "care.stairs", "care.hearing", "care.household", "home.usualRoom", "home.bedroom", "home.hazardNote"];
-
 const getAt = (obj, path) => path.split(".").reduce((o, k) => o?.[k], obj);
 const setField = (plan, path, value, source) => Object.assign(getAt(plan, path), { value, status: "filled", source, memoId: null });
 
@@ -89,10 +87,11 @@ export function importRow({ headers, row, mapping, source = "csv" }) {
     if (raw[key]) identity[key] = normalize(raw[key]);
   }
   // 計画には元の言葉を残す。手元の画面と市向けの出力に使うため。置き換えるのは送る直前だけ
-  if (raw["care.level"]) setField(plan, "care.level", raw["care.level"], source);
   if (raw["care.weekly"]) setField(plan, "care.weekly", parseWeekly(raw["care.weekly"]), source);
-  for (const path of TEXT_FIELDS) {
-    if (raw[path]) setField(plan, path, raw[path], source);
+  // 計画書の列につないだ列は、計画のどの欄にも入る
+  for (const [path, value] of Object.entries(raw)) {
+    const target = getAt(plan, path);
+    if (value && path !== "care.weekly" && target && typeof target === "object" && "status" in target) setField(plan, path, value, source);
   }
 
   // 手で入れたときは入口の様式が無いので、入口へは書き出さない

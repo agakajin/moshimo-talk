@@ -2,7 +2,7 @@
 import { decodeCsv, parseCsv } from "/core/csv.js";
 import { maskTable } from "/core/mask.js";
 import { findLeaks } from "/core/redact.js";
-import { attachOutput, checkResumedFormat, DEFAULT_TARGETS, duplicateHeaders, isOwnNumberColumn, OUTPUT_TARGETS, suspiciousHeaders } from "/core/format.js";
+import { attachOutput, checkResumedFormat, DEFAULT_TARGETS, duplicateHeaders, expand, isOwnNumberColumn, OUTPUT_TARGETS, suspiciousHeaders } from "/core/format.js";
 import { chooseConflict, describeFlows, findPersonRow, mergeOutputRow, pendingRechecks } from "/core/merge.js";
 import { fromResumeFile, importRow, serviceGaps } from "/core/plan.js";
 import { startTalk } from "/talk.js";
@@ -84,7 +84,7 @@ async function beginTalk(imported, options = {}) {
     showError($("fileError"), "画面の設定を読めませんでした。もう一度押してください。");
     return;
   }
-  for (const id of ["step1", "step2", "step3", "step4", "step5", "manual"]) $(id).hidden = true;
+  for (const id of ["step1", "step2", "step4", "step5", "manual"]) $(id).hidden = true;
   document.querySelector(".steps").hidden = true;
   document.body.classList.remove("home");
   document.body.classList.add("wide-mode");
@@ -95,7 +95,7 @@ async function beginTalk(imported, options = {}) {
 
 function goTo(step) {
   // 終わった段階は積み重ねず、今の段階だけを見せる
-  for (let i = 1; i <= 5; i++) {
+  for (const i of [1, 2, 4, 5]) {
     $(`step${i}`).hidden = i !== step;
     const mark = document.querySelector(`.steps [data-step="${i}"]`);
     mark.classList.toggle("current", i === step);
@@ -175,6 +175,11 @@ function connect() {
   state.table = null;
   state.masked = null;
   state.mapping = null;
+  state.results = null;
+  state.careEdits = {};
+  state.links = {};
+  state.rowIndex = 0;
+  state.whoChosen = undefined;
   if (care) {
     loadCare(care.table);
     return;
@@ -202,15 +207,18 @@ function loadCare(table) {
 // 入口の値だけが入った計画を作り直す。もう片方の値を入れ直しても前の値が残らないように
 function freshImported() {
   if (!state.table || !state.mapping) return importRow({ headers: [], row: [], mapping: {}, source: "human" });
-  return importRow({ headers: state.table.headers, row: state.table.rows[state.rowIndex], mapping: state.mapping });
+  const imported = importRow({ headers: state.table.headers, row: state.table.rows[state.rowIndex], mapping: state.mapping });
+  // 計画に無い欄でつないだ列は、計画書の列と同じ欄にする
+  for (const custom of imported.customs) custom.label = state.links?.[custom.label] ?? custom.label;
+  return imported;
 }
 
-// 計画書のファイルがあれば、その見出しで様式を読む。無ければ今の様式のまま
-function prepareFormat() {
+// 計画書のファイルがあれば、その見出しで様式を読む。無ければ今の様式のまま。confirmed は見出しを送る画面で見せたあと
+function prepareFormat({ confirmed = false } = {}) {
   const plan = state.slots.plan;
   if (plan && state.formatTaken !== plan) {
     state.formatTaken = plan;
-    takeFormat(plan.name, plan.table);
+    takeFormat(plan.name, plan.table, { confirmed });
     return;
   }
   if (!plan) {
@@ -221,7 +229,7 @@ function prepareFormat() {
 }
 
 // 様式の見出しと値を受け取る。見出しは Claude へ送る前に見せ、値は手元に残す
-async function takeFormat(fileName, { headers, rows }) {
+async function takeFormat(fileName, { headers, rows }, { confirmed = false } = {}) {
   formatRequest += 1;
   state.whoChosen = undefined;
   $("formatDefault").disabled = false;
@@ -247,6 +255,10 @@ async function takeFormat(fileName, { headers, rows }) {
     return;
   }
   state.formatData = { name, headers, rows };
+  if (confirmed) {
+    chooseFormat(name, headers);
+    return;
+  }
   // 取り込みと同じく、送る前に中身を見せる
   $("formatSendList").textContent = headers.join("、");
   $("formatSendGo").onclick = () => chooseFormat(name, headers);
@@ -289,6 +301,10 @@ function renderMask() {
   }
   $("payloadRaw").textContent = JSON.stringify(payload, null, 2);
   showMaskRows(false);
+  // 計画書は見出しだけを読むので、値は見せず、送る見出しをここで一緒に見せる
+  const planHeaders = state.slots.plan?.table.headers ?? [];
+  $("maskPlanHeaders").hidden = planHeaders.length === 0;
+  $("maskPlanHeaders").textContent = `個別避難計画書からは、見出しだけを読みます（値は送りません）：${planHeaders.join("、")}`;
 }
 
 // はじめは一部だけ見せ、押すと全部の列を見せる
@@ -321,8 +337,15 @@ async function sendColumns() {
     state.results = data.results;
     $("modeNotice").hidden = data.mode !== "mock";
     $("modeNotice").textContent = "今は Claude につないでいません。見出しの言葉から作った仮の答えです。";
-    renderConfirm();
-    goTo(3);
+    state.careEdits = {};
+    state.links = {};
+    state.rowIndex = 0;
+    state.whoChosen = undefined;
+    renderCareWho();
+    refreshDraft();
+    // 様式を選んだあとで戻ってきたときは、その様式のままにする
+    prepareFormat({ confirmed: true });
+    goTo(4);
   } catch (e) {
     if (request === columnsRequest) showError($("sendError"), `送れませんでした。${e.message}`);
   } finally {
@@ -333,77 +356,70 @@ async function sendColumns() {
   }
 }
 
-function renderConfirm() {
-  const { headers, rows } = state.table;
+// ケアプランに複数の方がいるとき、どの方の計画を作るかを選ぶ
+function renderCareWho() {
+  const { rows } = state.table;
   $("whoRow").hidden = rows.length < 2;
   $("who").replaceChildren(...rows.map((row, i) => el("option", { value: String(i), textContent: `${i + 1}件目：${row[0] ?? ""}` })));
-  const fileName = state.slots.care?.name;
-  $("confirmLegend").textContent = `読み込んだケアプラン：${fileName ?? ""}`;
-  // 2列に並ぶので、列の上にそれぞれ「左は何か、右は何か」を出す
-  const legend = () => el("div", { className: "flow-row confirm-row confirm-legend" },
-    el("div", { className: "kind-care confirm-from" }, el("b", { textContent: "ケアプランの列" }), rows.length > 1 ? "と1件目の値" : "と値"),
-    el("span", { className: "flow-arrow", textContent: "→" }),
-    el("div", { className: "confirm-to" }, el("b", { textContent: "この道具の計画の欄" })));
-  const table = $("confirmTable");
-  table.replaceChildren(legend(), Object.assign(legend(), { className: "flow-row confirm-row confirm-legend confirm-legend-second" }));
-  state.results.forEach((r) => {
-    const col = headers.indexOf(r.header);
-    const select = el("select", { "ariaLabel": `${r.header} の欄` });
-    select.dataset.header = r.header;
-    for (const [value, label] of Object.entries(TARGETS)) select.append(el("option", { value, textContent: label }));
-    select.value = r.target in TARGETS ? r.target : "unknown";
-    // 番号は持ち主ごとに別のものなので、計画につながない
-    const ownNumber = isOwnNumberColumn(r.header);
-    if (ownNumber) {
-      select.value = "ignore";
-      select.disabled = true;
-    }
-    const kind = () => (select.value === "unknown" ? "kind-unknown" : "kind-care");
-    const original = String(rows[0]?.[col] ?? "").trim();
-    const row = el("div", { className: `flow-row confirm-row ${ownNumber ? "kind-keep" : kind()}` },
-      el("div", { className: "flow-from" }, el("span", { textContent: r.header }), el("span", { className: "value", textContent: original || "（空）" })),
-      el("span", { className: "flow-arrow", textContent: "→" }),
-      el("div", {}, select, ...(ownNumber ? [el("small", { className: "own-number", textContent: "番号は触りません" })] : [])));
-    select.addEventListener("change", () => {
-      row.classList.toggle("kind-unknown", select.value === "unknown");
-      row.classList.toggle("kind-care", select.value !== "unknown");
-    });
-    table.append(row);
-  });
 }
 
-function confirmMapping() {
-  showError($("confirmError"), "");
-  const selects = [...$("confirmTable").querySelectorAll("select")];
+const careHeaders = () => state.table?.headers ?? state.imported?.input?.headers ?? [];
+
+// ケアプランの列が、内側のどの項目に入るか。画面には出さない
+function careTargetOf(header) {
+  if (state.backToTalk) return state.imported?.input?.mapping?.[header] ?? "ignore";
+  // 番号は持ち主ごとに別のものなので、つながない
+  if (isOwnNumberColumn(header)) return "ignore";
+  const read = state.results?.find((r) => r.header === header)?.target;
+  return state.careEdits?.[header] ?? (read in TARGETS ? read : "unknown");
+}
+
+// 今の選択から、取り込みの対応を作る。strict のときは問題があれば理由を返す
+function buildMapping({ strict = false } = {}) {
   const mapping = {};
   const used = new Map();
-  for (const s of selects) {
-    if (s.value === "unknown") {
-      showError($("confirmError"), `「${s.dataset.header}」の欄を選んでください。分からなければ「使わない」を選べます。`);
-      return;
+  for (const header of state.table?.headers ?? []) {
+    const target = careTargetOf(header);
+    if (target === "ignore") continue;
+    if (target === "unknown") {
+      if (strict) return { error: `「${header}」をどうするか選んでください。分からなければ「使わない」を選べます。` };
+      continue;
     }
-    if (s.value === "ignore") continue;
     // 足した欄の見出しは訪問のたびに送る。あとで止まると直す場所がない
-    if (s.value === "new" && suspiciousHeaders([s.dataset.header]).length > 0) {
-      showError($("confirmError"), `「${s.dataset.header}」は名前や番号と間違えやすいので、計画に無い欄にできません。「使わない」を選んでください。`);
-      return;
-    }
+    if (strict && target === "new" && suspiciousHeaders([header]).length > 0) return { error: `「${header}」は名前や番号と間違えやすいので、計画に無い欄にできません。「使わない」を選んでください。` };
     // 計画に無い欄は、列ごとに別の欄として足す
-    if (s.value !== "new" && used.has(s.value)) {
-      showError($("confirmError"), `「${s.dataset.header}」と「${used.get(s.value)}」が同じ欄になっています。`);
-      return;
-    }
-    used.set(s.value, s.dataset.header);
-    mapping[s.dataset.header] = s.value;
+    if (strict && target !== "new" && used.has(target)) return { error: `「${header}」と「${used.get(target)}」が同じ列につながっています。` };
+    used.set(target, header);
+    mapping[header] = target;
   }
-  state.mapping = mapping;
-  state.rowIndex = Number($("who").value) || 0;
-  // 別の方を選び直したら、計画書の行も選び直す
-  state.whoChosen = undefined;
+  return { mapping };
+}
+
+// 画面で値を見せるために、今の選択で計画を作り直す。訪問の途中では作り直さない
+function refreshDraft() {
+  if (state.backToTalk || !state.table) return;
+  state.mapping = buildMapping().mapping;
   state.imported = freshImported();
-  // 様式を選んだあとで選び直したときは、その様式のままにする
-  prepareFormat();
-  goTo(4);
+}
+
+// ケアプランの列と計画書の列を直接つなぐ。内側の項目は計画書の列に合わせる
+function connectColumns(care, planHeader) {
+  const target = currentColumns().find((c) => c.header === planHeader)?.target;
+  delete state.links[care];
+  for (const [other, linked] of Object.entries(state.links)) if (linked === planHeader) { delete state.links[other]; state.careEdits[other] = "ignore"; }
+  if (!target || ["none", "unknown", "new"].includes(target)) {
+    state.formatEdits ??= {};
+    state.formatEdits[planHeader] = "new";
+    state.careEdits[care] = "new";
+    state.links[care] = planHeader;
+    return;
+  }
+  const others = careHeaders().filter((h) => h !== care);
+  const paths = expand(target);
+  // 1列にまとめる列は、まだ空いている項目へ入れる。1項目の列は、前につないでいた列を外す
+  const free = paths.find((p) => !others.some((h) => careTargetOf(h) === p)) ?? paths[paths.length - 1];
+  if (paths.length === 1) for (const h of others) if (careTargetOf(h) === free) state.careEdits[h] = "ignore";
+  state.careEdits[care] = free;
 }
 
 // 様式の見出しを、内容と結びつける。ここで人が確かめる
@@ -459,6 +475,7 @@ async function chooseFormat(name, headers) {
 function renderFormat(columns) {
   state.formatColumns = columns;
   state.formatOpen = new Set();
+  refreshDraft();
   renderFormatWho();
   renderFlows();
 }
@@ -470,34 +487,53 @@ function clearFlows() {
   state.formatColumns = [];
   $("formatSummary").replaceChildren();
   $("formatTable").replaceChildren();
-  $("formatUnused").hidden = true;
   $("formatBackNote").hidden = true;
 }
 
 const FLOW_GROUPS = [
   ["unknown", "選んでください", ""],
-  ["care", "ケアプランから渡す", "ケアプラン"],
-  ["plan", "入れた計画書から渡す", "入れた計画書"],
-  ["talk", "訪問で聞いて渡す", "訪問で聞く"],
-  ["hand", "手で入れて渡す", "手で入れる"],
-  ["auto", "自動で入る", ""],
-  ["keep", "番号はそのまま（触りません）", ""],
-  ["none", "空のまま出す", ""],
+  ["care", "つながっている列", "ケアプラン"],
+  ["plan", "計画書にだけ値がある列", "入れた計画書"],
+  ["talk", "訪問で聞く列", "訪問で聞く"],
+  ["hand", "手で入れる列", "手で入れる"],
+  ["auto", "自動で入る列", ""],
+  ["keep", "番号の列（触りません）", ""],
+  ["none", "空のまま出す列", ""],
+  ["left", "ケアプランだけの列（計画書には渡しません）", ""],
 ];
-const FLOW_PLAIN = { unknown: "入れる内容が分かりません", talk: "訪問で聞く", hand: "手元の情報に手で入れる", none: "入れません", keep: "空のまま（番号は付けません）", auto: "作成した日" };
+const FLOW_PLAIN = { unknown: "選んでください", talk: "訪問で聞く", hand: "手元の情報に手で入れる", none: "入れません", keep: "ケアプランの番号は移しません", auto: "作成した日" };
 
-// 渡す様式の見え方：元 → 渡す先。直すときだけ選択肢を開く
+// 列をつなぐ画面。左はケアプランの列と値、右は個別避難計画書の列と値
 function renderFlows() {
   const columns = currentColumns();
   const data = activeFormatData();
   const who = Number($("formatWho").value);
-  const { rows, unused } = describeFlows({
+  const input = state.imported?.input;
+  const { rows } = describeFlows({
     columns,
-    input: state.imported?.input,
+    input,
     plan: state.imported?.plan,
+    customs: state.imported?.customs,
     planHeaders: data?.headers,
     planRow: data && who >= 0 ? data.rows[who] : null,
   });
+
+  // つながっている列と、ケアプランだけの列に分ける
+  const valueOf = (header) => {
+    const headers = state.table?.headers ?? input?.headers ?? [];
+    const row = state.table ? state.table.rows[state.rowIndex] : input?.row;
+    return String(row?.[headers.indexOf(header)] ?? "").trim();
+  };
+  const linkedTo = (column) => careHeaders().filter((h) => state.links?.[h] === column.header || (column.target !== "meta.serial" && expand(column.target).includes(careTargetOf(h))));
+  for (const row of rows) row.lefts = row.kind === "keep" ? [] : linkedTo(row);
+  const connected = new Set(rows.flatMap((r) => r.lefts));
+  // 値が空でも、つないだ列は「つながっている列」に出す
+  for (const row of rows) if (row.lefts.length > 0 && !["care", "unknown", "none"].includes(row.kind) && !row.talked) row.kind = "care";
+  const leftOnly = careHeaders().filter((h) => !connected.has(h)).map((header) => {
+    const target = careTargetOf(header);
+    return { header, leftOnly: true, target, kind: target === "unknown" ? "unknown" : "left", lefts: [header], value: valueOf(header) };
+  });
+  const all = [...rows, ...leftOnly];
 
   const count = (kind) => rows.filter((r) => r.kind === kind).length;
   const sources = FLOW_GROUPS.filter(([kind, , label]) => label && count(kind) > 0).flatMap(([kind, , label], i) => [
@@ -508,54 +544,112 @@ function renderFlows() {
     el("span", { className: "flow-to-all", textContent: "→" }),
     el("div", { className: "flow-goal" }, "渡す個別避難計画書", el("b", { textContent: `${state.formatName}の様式 ${columns.length}列` })));
 
-  $("formatTable").replaceChildren(...FLOW_GROUPS.filter(([kind]) => count(kind) > 0).map(([kind, title]) => el("section", { className: `flow-group kind-${kind}` },
-    el("h3", { className: "flow-head" }, title, el("small", { textContent: `${count(kind)}列` })),
-    el("div", { className: "flow-list" }, ...rows.filter((r) => r.kind === kind).map(flowRow)))));
+  const careName = state.slots.care?.name;
+  const planName = data ? state.slots.plan?.name : `${state.formatName}の様式`;
+  $("formatLegend").replaceChildren(
+    el("b", { className: "legend-care", textContent: "左：ケアプランの列と値" }), careName ? `（${careName}）` : "",
+    el("span", { className: "legend-gap", textContent: "／" }),
+    el("b", { textContent: "右：個別避難計画書の列と値" }), planName ? `（${planName}）` : "");
 
-  $("formatUnused").hidden = unused.length === 0;
-  $("formatUnused").textContent = `ケアプランにあるけれど計画書へ渡さない列：${unused.join("、")}`;
-  $("formatBackNote").hidden = !state.imported?.input;
+  const open = (kind) => all.filter((r) => r.kind === kind);
+  $("formatTable").replaceChildren(...FLOW_GROUPS.filter(([kind]) => open(kind).length > 0).map(([kind, title]) => el("section", { className: `flow-group kind-${kind}` },
+    el("h3", { className: "flow-head" }, title, el("small", { textContent: `${open(kind).length}列` })),
+    el("div", { className: "flow-list" }, ...open(kind).map((row) => flowRow(row, valueOf, columns))))));
+
+  // 計画書のファイルをつないでいるときは、別の様式を選ぶと値が使えないので、選ぶところを出さない
+  $("formatChoices").hidden = Boolean(data);
+  $("formatBackNote").hidden = !input;
 }
 
-function flowRow(row) {
+const option = (value, textContent) => el("option", { value, textContent });
+
+// 直す選択肢。相手の列を先に出し、そのほかの扱いを後ろに出す
+function rowOptions(row, columns) {
+  const select = el("select", { ariaLabel: `${row.header} のつなぎ先` });
+  const canLink = !state.backToTalk;
+  if (row.leftOnly) {
+    const targets = columns.filter((c) => !c.target.startsWith("meta.") && !c.target.startsWith("helper") && !isOwnNumberColumn(c.header));
+    if (canLink) select.append(Object.assign(el("optgroup", { label: "計画書の列につなぐ" }), {}));
+    if (canLink) select.lastChild.append(...targets.map((c) => option(`plan:${c.header}`, c.header)));
+    const rest = el("optgroup", { label: "そのほか" });
+    rest.append(...Object.entries(TARGETS).map(([value, label]) => option(value, label)));
+    if (row.target in TARGETS) select.append(rest);
+    else select.append(rest, option(row.target, "今の項目のまま"));
+    select.value = row.target;
+    return select;
+  }
+  const lefts = careHeaders().filter((h) => !isOwnNumberColumn(h));
+  if (canLink && lefts.length > 0) {
+    const group = el("optgroup", { label: "ケアプランの列につなぐ" });
+    group.append(...lefts.map((h) => option(`care:${h}`, h)));
+    select.append(group);
+  }
+  const rest = el("optgroup", { label: "そのほか" });
+  rest.append(...Object.entries({ ...OUTPUT_TARGETS, unknown: "分からない（選んでください）" }).map(([value, label]) => option(value, label)));
+  select.append(rest);
+  select.value = canLink && row.lefts.length === 1 ? `care:${row.lefts[0]}` : row.target;
+  return select;
+}
+
+function flowRow(row, valueOf, columns) {
   const { header, kind, target } = row;
-  const select = el("select", { ariaLabel: `${header} に入れる内容` });
-  select.dataset.header = header;
-  for (const [value, label] of Object.entries({ ...OUTPUT_TARGETS, unknown: "分からない（選んでください）" })) select.append(el("option", { value, textContent: label }));
-  select.value = target;
-  const open = kind === "unknown" || state.formatOpen?.has(header);
-  select.hidden = !open;
+  const key = `${row.leftOnly ? "care" : "plan"}:${header}`;
+  const select = rowOptions(row, columns);
+  select.dataset.key = key;
+  const isOpen = kind === "unknown" || state.formatOpen?.has(key);
+  select.hidden = !isOpen;
   select.addEventListener("change", () => {
+    const [how, other] = select.value.startsWith("care:") || select.value.startsWith("plan:") ? [select.value.slice(0, 4), select.value.slice(5)] : [null, null];
     state.formatEdits ??= {};
-    state.formatEdits[header] = select.value;
-    state.formatOpen.add(header);
+    state.careEdits ??= {};
+    state.links ??= {};
+    if (how === "care") connectColumns(other, header);
+    else if (how === "plan") connectColumns(header, other);
+    else if (row.leftOnly) {
+      delete state.links[header];
+      state.careEdits[header] = select.value;
+    } else {
+      state.formatEdits[header] = select.value;
+      // つないでいた列は外し、もとの読み取りに戻す
+      for (const h of row.lefts) {
+        delete state.links[h];
+        delete state.careEdits[h];
+      }
+    }
+    state.formatOpen.add(key);
+    refreshDraft();
     renderFormatWho();
     renderFlows();
     // 選び直した行は別のまとまりへ移るので、押していた場所を見失わないようにする
-    const moved = [...$("formatTable").querySelectorAll("select")].find((s) => s.dataset.header === header);
+    const moved = [...$("formatTable").querySelectorAll("select")].find((s) => s.dataset.key === key);
     moved?.focus();
     moved?.closest(".flow-row").scrollIntoView({ block: "nearest" });
   });
   const edit = el("button", { className: "button mini", type: "button", textContent: "直す" });
-  // 番号の列は直せない。そのまま残すだけ
-  edit.hidden = open || (kind === "keep" && isOwnNumberColumn(header));
+  // 番号の列は直せない。訪問の途中はケアプランの列をつなぎ直さない
+  const ownNumber = isOwnNumberColumn(header);
+  edit.hidden = isOpen || ownNumber || (row.leftOnly && state.backToTalk);
   edit.addEventListener("click", () => {
-    state.formatOpen.add(header);
+    state.formatOpen.add(key);
     select.hidden = false;
     edit.hidden = true;
     select.focus();
   });
-  const from = row.talked
-    ? [el("span", { textContent: "訪問で聞いた値" }), el("span", { className: "value", textContent: row.talked.join("、") })]
-    : row.from.length > 0
-      ? row.from.flatMap((c) => [el("span", { textContent: kind === "plan" ? "入れた計画書" : kind === "keep" ? "計画書の番号" : c.header }), el("span", { className: "value", textContent: c.value })])
-      : [el("span", { className: "plain", textContent: FLOW_PLAIN[kind] })];
+  const pair = (name, value) => [el("span", { textContent: name }), el("span", { className: "value", textContent: value || "（空）" })];
+  const left = row.talked
+    ? pair("訪問で聞いた値", row.talked.join("、"))
+    : row.lefts.length > 0
+      ? row.lefts.flatMap((h) => pair(h, valueOf(h)))
+      : [el("span", { className: "plain", textContent: kind === "plan" ? "ケアプランにはありません" : FLOW_PLAIN[kind] })];
+  const right = row.leftOnly
+    ? [el("span", { className: "plain", textContent: kind === "unknown" ? "つなぐ先を選んでください" : ownNumber ? "番号は触りません" : "計画書には渡しません" })]
+    : [el("span", { className: "flow-name", textContent: header }), ...(row.incoming ? [el("span", { className: "value", textContent: row.incoming })] : [])];
   return el("div", { className: "flow-row" },
-    el("div", { className: "flow-from" }, ...from),
-    el("span", { className: "flow-arrow", textContent: "→" }),
-    el("div", { className: "flow-to", textContent: header }),
+    el("div", { className: "flow-from" }, ...left),
+    el("span", { className: "flow-arrow", textContent: kind === "care" ? "⇄" : "→" }),
+    el("div", { className: "flow-to" }, ...right),
     edit,
-    ...(row.differs ? [el("div", { className: "flow-differs", textContent: `入れた計画書は「${row.differs}」です。次の画面で扱いを選びます。` })] : []),
+    ...(row.differs ? [el("div", { className: "flow-differs", textContent: "値が違います。次の画面で扱いを選びます。" })] : []),
     select);
 }
 
@@ -620,6 +714,14 @@ async function confirmFormat() {
   if (unknown) {
     showError($("formatError"), `「${unknown.header}」に入れる内容を選んでください。分からなければ「空のまま出す」を選べます。`);
     return;
+  }
+  if (!state.backToTalk && state.table) {
+    const { mapping, error } = buildMapping({ strict: true });
+    if (error) {
+      showError($("formatError"), error);
+      return;
+    }
+    state.mapping = mapping;
   }
   const village = await loadVillage();
   // 選び直しても前の値が混ざらないよう、訪問の前は入口の値から作り直して入れる
@@ -809,7 +911,6 @@ const backToStart = () => {
   goTo(1);
 };
 $("sendBack").addEventListener("click", backToStart);
-$("confirmBack").addEventListener("click", () => goTo(2));
 $("send").addEventListener("click", sendColumns);
 $("formatDefault").addEventListener("click", () => chooseFormat("ハッカ村", null));
 $("formatMint").addEventListener("click", async () => {
@@ -856,7 +957,7 @@ $("formatBack").addEventListener("click", () => {
     document.body.classList.add("wide-mode");
     window.scrollTo(0, 0);
   } else if (state.backToTalk) closeFormat();
-  else goTo(state.table ? 3 : 1);
+  else goTo(state.table ? 2 : 1);
 });
 $("stepFormat").addEventListener("click", () => {
   reopenFormat();
@@ -864,7 +965,14 @@ $("stepFormat").addEventListener("click", () => {
 });
 $("changeFormat").addEventListener("click", openFormat);
 $("wrapFormat").addEventListener("click", openFormat);
-$("confirm").addEventListener("click", confirmMapping);
+$("who").addEventListener("change", () => {
+  state.rowIndex = Number($("who").value) || 0;
+  // 別の方を選び直したら、計画書の行も選び直す
+  state.whoChosen = undefined;
+  refreshDraft();
+  renderFormatWho();
+  renderFlows();
+});
 $("startTalk").addEventListener("click", () => beginTalk(state.imported));
 
 $("manualForm").append(...MANUAL_FIELDS.map(([key, label]) => el("label", { className: "field-label" }, label, el("input", { className: "plan-input", name: key }))));
