@@ -319,6 +319,30 @@ function showMaskRows(all) {
   $("maskAll").onclick = () => showMaskRows(!all);
 }
 
+// 待っている間、一覧の元の値が送る記号へ変わっていく様子を見せる。送る中身は最初から記号だけで、これは画面の中の見せ方
+const MORPH_GAP = 350;
+function playMorph() {
+  const { columns } = state.masked.payload;
+  const rows = [...$("maskTable").querySelectorAll("tr")].slice(1);
+  const visible = rows.filter((row) => !row.hidden).length;
+  let order = 0;
+  rows.forEach((row, i) => {
+    const original = String(state.table.rows[0]?.[i] ?? "").trim();
+    const cell = row.querySelector(".mask-original");
+    const to = columns[i].withheld ? "送りません" : columns[i].samples[0] ?? "";
+    cell.textContent = original || "（空）";
+    if (row.hidden || !original || !to) return;
+    const fromEl = el("span", { className: "morph-from", textContent: original });
+    const toEl = el("span", { className: "morph-to", textContent: to });
+    fromEl.style.animationDelay = toEl.style.animationDelay = `${order * Math.min(MORPH_GAP, 4000 / visible)}ms`;
+    order += 1;
+    cell.replaceChildren(el("span", { className: "morph-value" }, fromEl, toEl));
+  });
+  $("maskTable").scrollIntoView({ block: "nearest" });
+  // 答えがすぐ返っても、ひと回りは見せる
+  return new Promise((resolve) => setTimeout(resolve, order === 0 ? 0 : Math.min(MORPH_GAP * order, 4000) + 1000));
+}
+
 let columnsRequest = 0;
 async function sendColumns() {
   columnsRequest += 1;
@@ -326,6 +350,7 @@ async function sendColumns() {
   showError($("sendError"), "");
   $("send").disabled = true;
   $("sendState").hidden = false;
+  const firstRound = playMorph();
   try {
     const res = await fetch("/api/read-columns", {
       method: "POST",
@@ -333,6 +358,7 @@ async function sendColumns() {
       body: JSON.stringify(state.masked.payload),
     });
     const data = await res.json();
+    await firstRound;
     if (request !== columnsRequest) return;
     if (!res.ok) throw new Error((data.errors ?? ["読み取れませんでした"]).join(" / "));
     state.results = data.results;
@@ -576,7 +602,7 @@ function renderFlows() {
   const inGroup = (row, kind) => (kind === "differs" ? row.kind === "care" && row.differs : row.kind === kind && !(kind === "care" && row.differs));
   const groups = [["differs", "値が違う列"], ...FLOW_GROUPS].filter(([kind]) => visible.some((r) => inGroup(r, kind)));
   const empty = visible.length === 0 ? [el("p", { className: "tab-empty", textContent: "確かめるところはありません。このまま進めます。" })] : [];
-  $("formatTable").replaceChildren(...empty, ...groups.map(([kind, title]) => el("section", { className: `flow-group kind-${kind === "differs" ? "care" : kind}` },
+  $("formatTable").replaceChildren(...empty, ...groups.map(([kind, title]) => el("section", { className: `flow-group kind-${kind === "differs" ? "talk" : kind}` },
     el("h3", { className: "flow-head" }, title, el("small", { textContent: `${visible.filter((r) => inGroup(r, kind)).length}列` })),
     el("div", { className: "flow-list" }, ...visible.filter((r) => inGroup(r, kind)).map((row) => flowRow(row, valueOf, columns))))));
 
@@ -705,9 +731,7 @@ function renderFormatWho() {
 function renderMerge(merge) {
   $("mergeBox").hidden = !merge;
   if (!merge) return;
-  const { filled, conflicts, unread, helpers } = merge;
-  $("mergeFilled").hidden = filled.length === 0;
-  $("mergeFilled").textContent = `計画書から入った欄：${filled.map((f) => f.label).join("、")}`;
+  const { conflicts, unread, helpers } = merge;
   const conflictRows = conflicts.map((c) => {
     const select = el("select", { ariaLabel: `${c.label} の扱い` });
     select.append(
@@ -724,11 +748,12 @@ function renderMerge(merge) {
   });
   $("mergeConflicts").replaceChildren(...(conflictRows.length ? [el("p", { className: "merge-conflict-note", textContent: "どちらが今の情報か分からないときは、ご本人に確かめます。" })] : []), ...conflictRows);
   const notes = [];
-  if (conflicts.length === 0 && filled.length === 0) notes.push("計画書から新しく入った欄はありません。");
   if (helpers.length > 0) notes.push(`入れた計画書に手伝う人がいます（${helpers.join("、")}）。今も頼めるかを話の中で確かめ、印を付けてください。`);
   if ((state.imported.leftovers ?? []).length > 0) notes.push(`1列にまとめて書かれていた文は、欄に分けず手元に残しました：${state.imported.leftovers.map((l) => l.label).join("、")}`);
   if (unread.length > 0) notes.push(`形を読めなかったので入れていません：${unread.join("、")}`);
   $("mergeNotes").replaceChildren(...notes.map((n) => el("li", { textContent: n })));
+  // 知らせることが無ければ枠ごと出さない
+  $("mergeBox").hidden = conflicts.length === 0 && notes.length === 0;
 }
 
 async function confirmFormat() {

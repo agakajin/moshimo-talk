@@ -301,6 +301,18 @@ body:not(.home) #roleAsk { display: none; }
 .mask-plan { margin-top: 12px; }
 .merge-conflict-note { margin: 0 0 6px; font-size: 14px; color: var(--muted); }
 .mask-all { margin-top: 10px; }
+/* 送っている間：一覧の元の値が、送る記号へ変わって戻るのを繰り返す。送り終えたら元の値に戻す */
+.morph-value { display: grid; }
+.morph-from, .morph-to { grid-area: 1 / 1; animation: 6s ease-in-out infinite; }
+.morph-from { animation-name: morph-out; }
+.morph-to { color: var(--accent); font-weight: 700; opacity: 0; animation-name: morph-in; }
+#step2:has(#sendState[hidden]) .morph-from { animation: none; }
+#step2:has(#sendState[hidden]) .morph-to { display: none; }
+@keyframes morph-out { 0%, 8% { opacity: 1; filter: blur(0); } 24%, 82% { opacity: 0; filter: blur(5px); } 98%, 100% { opacity: 1; filter: blur(0); } }
+@keyframes morph-in { 0%, 8% { opacity: 0; filter: blur(5px); } 24%, 82% { opacity: 1; filter: blur(0); } 98%, 100% { opacity: 0; filter: blur(5px); } }
+@media (prefers-reduced-motion: reduce) {
+  .morph-from, .morph-to { animation: none; }
+}
 .mask-original { overflow-wrap: anywhere; }
 .mask-arrow { width: 2em; color: var(--muted); font-weight: 700; text-align: center; }
 .mask-others { display: block; color: var(--muted); font-family: inherit; font-size: 13px; }
@@ -349,8 +361,7 @@ body:not(.home) #roleAsk { display: none; }
 
 .merge-box { margin: 12px 0 8px; padding: 12px 16px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent-soft); }
 .panel .merge-box h3 { margin: 0 0 6px; }
-.merge-filled { margin: 0 0 8px; font-size: 15px; }
-.merge-conflict { display: grid; grid-template-columns: 9em minmax(0, 1fr); align-items: center; gap: 8px; margin-bottom: 6px; font-size: 15px; }
+.merge-conflict { display: grid; grid-template-columns: 9em minmax(0, 1fr); align-items: center; gap: 8px; margin-bottom: 6px; padding: 6px 10px; border-left: 4px solid #d98a1f; border-radius: 6px; background: var(--warn-soft); color: var(--warn); font-size: 15px; font-weight: 600; }
 .merge-notes { margin: 6px 0 0; padding-left: 20px; font-size: 14px; }
 
 @media (max-width: 700px) {
