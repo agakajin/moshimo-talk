@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { findLeaks, personalKind, redact } from "../src/core/redact.js";
 import { buildVillageRow, evacuationSentence } from "../src/core/output.js";
 import { applyUpdates, createPlan, fieldsBefore, moveField, placedFields } from "../src/core/plan.js";
-import { acceptScribe } from "../src/server/claude.js";
+import { acceptFindings, acceptScribe } from "../src/server/claude.js";
+import { nextTopic } from "../src/core/talk.js";
 import { validateCheckPayload } from "../src/server/validate.js";
 
 const ADDRESS = { value: "架空村 字川上 12-3", alias: "自宅", kind: "address" };
@@ -388,4 +389,55 @@ test("復唱の「行くんですね」を名前にしない", () => {
     assert.equal(redact(text), text, text);
     assert.equal(personalKind(text), null, text);
   }
+});
+
+test("音声認識の文：句点がなくても、空白の切れ目で問いかけを見分ける", () => {
+  assert.deepEqual(scribe([up("evacuation.place", "公民館", "公民館に行かれますか")], [], "公民館に行かれますか ありがとうございます"), []);
+  assert.equal(scribe([up("care.stairs", "一人で降りられる", "一人で降りれるって事ですね")], [], "階段降りる時は手すりに捕まって降りているんですね 一人で降りれるって事ですねわかりました").length, 1);
+});
+
+test("「ですかね」は捨てず、Claude の判断と人の確認に任せる", () => {
+  const memo = "逃げるとしたら 公民館ですかね あーなるほど分かりました";
+  assert.equal(scribe([up("evacuation.place", "公民館", "公民館ですかね")], [], memo).length, 1);
+});
+
+test("空白の切れ目で、別の人の「頼んだ」を使わない。引用がまたげば文全体を見る", () => {
+  assert.equal(scribe([], [helper("隣の人", "隣の人がいる", true)], "隣の人がいる 娘には頼んだ")[0].value.asked, false);
+  assert.equal(scribe([], [helper("隣の人", "隣の人に 頼みました", true)], "隣の人に 頼みました")[0].value.asked, true);
+});
+
+test("書き取りは階段や聞こえ方の欄にも書け、CSV と違えば尋ねる", () => {
+  const plan = createPlan();
+  plan.care.stairs = { status: "filled", value: "一人では難しい", source: "csv", memoId: null };
+  const updates = scribe([up("care.stairs", "一人で降りられる", "一人で降りられる")], [], "階段は一人で降りられるんですね");
+  const conflicts = applyUpdates(plan, updates, 1);
+  assert.deepEqual(conflicts.map((c) => [c.path, c.current, c.proposed]), [["care.stairs", "一人では難しい", "一人で降りられる"]]);
+  assert.equal(plan.care.stairs.value, "一人では難しい");
+});
+
+test("分数の一部だけを引用しても通らない", () => {
+  assert.deepEqual(scribe([up("evacuation.moveMinutes", "15", "15分")], [], "公民館まで1時間15分かかる"), []);
+  assert.deepEqual(scribe([up("evacuation.moveMinutes", "75", "1時間15分")], [], "公民館まで1時間15分かかる").map((u) => u.value), ["75"]);
+});
+
+test("点検の文で、決まった、安全と言い切らない。まだ決まっていないは通す", () => {
+  const yardsticks = [{ label: "最低ライン" }];
+  const take = (text) => acceptFindings([{ yardstick: "最低ライン", text, interrupt: false, opener: null, request: null }], yardsticks).length;
+  for (const text of ["避難場所は小学校と決まっているので、次を考えましょう", "計画は完成しました", "公民館まで行けば安全です", "この計画なら間に合います", "市に連絡を入れておきます", "病院へ行ってください"]) assert.equal(take(text), 0, text);
+  for (const text of ["逃げる先はまだ決まっていません", "手伝う人はまだ聞けていません"]) assert.equal(take(text), 1, text);
+});
+
+test("移すときに人が直した値を入れる。元の欄は入る前に戻る", () => {
+  const { plan, fresh } = moved();
+  plan.evacuation.place = { status: "filled", value: "小学校", source: "human", memoId: null };
+  const result = moveField(plan, "evacuation.route", "evacuation.place", { previous: fresh.get("evacuation.route"), overwrite: true, value: "奥の部屋" });
+  assert.equal(result.moved, true);
+  assert.equal(plan.evacuation.place.value, "奥の部屋");
+  assert.equal(plan.evacuation.route.value, null);
+});
+
+test("ひとりになる時間帯を聞けたら、昼の話をもう一度聞かない", () => {
+  const plan = createPlan();
+  plan.home.aloneHours = { status: "filled", value: "火曜日の昼", source: "voice", memoId: 1 };
+  assert.notEqual(nextTopic(plan, { skipped: ["hazards", "place", "means", "time"] })?.id, "week");
 });

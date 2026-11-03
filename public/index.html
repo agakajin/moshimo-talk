@@ -11,6 +11,10 @@
   <header class="top">
     <h1>取り込み</h1>
     <p>同じことを二度聞かないために、手元のデータで分かる欄を先に埋めます。</p>
+    <div class="top-actions">
+      <button id="changeFormat" class="button">様式を変える</button>
+      <button id="goWrap" class="button primary">訪問終了</button>
+    </div>
   </header>
 
   <main>
@@ -18,7 +22,8 @@
       <li data-step="1">CSV を入れる</li>
       <li data-step="2">送る中身を見る</li>
       <li data-step="3">列を確かめる</li>
-      <li data-step="4">話すことが残る</li>
+      <li data-step="4">渡す様式を選ぶ</li>
+      <li data-step="5">話すことが残る</li>
     </ol>
 
     <section id="step1" class="panel">
@@ -60,6 +65,7 @@
       <div class="row">
         <button id="send" class="button primary">この中身を送って、列を読んでもらう</button>
       </div>
+      <p id="sendState" class="work-state" role="status" hidden>Claude が列の見出しを読んでいます。10秒ほどかかります。</p>
       <p id="sendError" class="error" role="alert" hidden></p>
     </section>
 
@@ -79,6 +85,31 @@
     </section>
 
     <section id="step4" class="panel" hidden>
+      <h2>どの様式で渡しますか</h2>
+      <p class="hint">計画の欄は、ここで選んだ様式に合わせます。見出しだけを読み、値は使いません。架空の様式です。</p>
+      <div class="row">
+        <button id="formatDefault" class="button">ハッカ村の様式</button>
+        <button id="formatMint" class="button">ミント市の様式</button>
+        <label class="button">様式の CSV を選ぶ
+          <input id="formatFile" type="file" accept=".csv,text/csv" hidden>
+        </label>
+      </div>
+      <div id="formatSend" class="notice" hidden>
+        <p>次の見出しだけを Claude へ送ります。名前や番号が混ざっていないか確かめてください。</p>
+        <p id="formatSendList"></p>
+        <button id="formatSendGo" class="button primary">この見出しを送って読む</button>
+      </div>
+      <p id="formatState" class="work-state" role="status" hidden>Claude が様式の見出しを読んでいます。10秒ほどかかります。</p>
+      <p id="formatNotice" class="notice" hidden></p>
+      <div class="scroll"><table id="formatTable"></table></div>
+      <p id="formatError" class="error" role="alert" hidden></p>
+      <div class="row">
+        <button id="formatGo" class="button primary" disabled>この様式で進む</button>
+        <button id="formatBack" class="button">戻る</button>
+      </div>
+    </section>
+
+    <section id="step5" class="panel" hidden>
       <h2>聞かなくてよいことと、話すこと</h2>
       <div class="columns">
         <div>
@@ -94,72 +125,87 @@
       <div id="week"></div>
       <div id="checks"></div>
       <p class="hint">計画の欄は、まだこの画面の中にしかありません。閉じると消えます。</p>
-      <div class="row"><button id="startTalk" class="button primary">訪問を始める</button></div>
+      <div class="row">
+        <button id="startTalk" class="button primary">訪問を始める</button>
+        <button id="stepFormat" class="button">様式を選び直す</button>
+      </div>
     </section>
 
     <section id="talk" hidden>
-      <div class="panel opener" aria-live="polite">
-        <p id="openerLabel" class="label">話のきっかけ</p>
-        <p id="opener" class="opener-text"></p>
-        <div class="row">
-          <button id="skip" class="button">今は聞けない</button>
-          <button id="nextMemo" class="button" hidden>台本の次の声メモを入れる</button>
-          <button id="goWrap" class="button primary">帰る前へ</button>
-        </div>
-      </div>
-      <p id="workState" class="work-state" role="status" hidden></p>
-      <p id="talkMode" class="notice" hidden></p>
-      <div class="talk-grid">
-        <div class="panel">
-          <h2>声メモ</h2>
-          <p class="hint">ご本人の話を聞いたら、確かめるつもりで復唱してください（「裏の部屋でお休みなんですね」）。大きなボタンを長押ししている間だけマイクが動き、その間の声がブラウザの音声認識（Google）に送られます。音は残さず、文字だけを使います。出た文字を確かめて、短く押すと計画に入ります。入った欄には色が付くので、違っていれば別の欄へ移してください。名前は言わず、「娘さん」「隣の人」のように話してください。</p>
-          <p class="hint">パソコンの Chrome か Edge で確かめています。スマホでの声の動作は、まだ確かめていません。</p>
-          <div class="row"><button id="mic" class="button mic" type="button">長押しで復唱／短く押して計画に入れる</button><span id="micState" class="hint" role="status"></span></div>
-          <div id="micKeyRow" class="row" hidden><span class="hint">キーでも同じ操作：<span id="micKey"></span></span><button id="micKeyChange" class="button" type="button">キーを変える</button></div>
-          <label for="memo" class="field-label">声メモの文字（その場で直せます）</label>
-          <textarea id="memo" rows="3"></textarea>
-          <div class="row"><button id="addMemo" class="button primary">計画に入れる</button></div>
-          <p id="memoError" class="error" role="alert" hidden></p>
-          <ol id="memos"></ol>
-          <h3>話に出た人の名前（Claude に送りません）</h3>
-          <p class="hint">ここに入れた名前は、声メモで言ってしまっても送る前に呼び名へ置き換えます。入れていない名前は置き換えられません。入れただけでは「頼めた」になりません。頼めたら、計画の「近くの人」で印を付けてください。</p>
-          <div class="row">
-            <input id="personName" class="plan-input short" placeholder="名前" aria-label="名前">
-            <input id="personAlias" class="plan-input short" placeholder="呼び名（例：隣の人）" aria-label="呼び名">
-            <input id="personPhone" class="plan-input short" placeholder="電話（任意）" aria-label="電話">
-            <button id="addPerson" class="button">入れる</button>
+      <div class="talk-layout">
+        <div class="talk-col">
+          <div class="panel opener" aria-live="polite">
+            <p id="openerLabel" class="label">話のきっかけ</p>
+            <p id="opener" class="opener-text"></p>
+            <div id="openerGoal" class="goal"></div>
+            <div class="row">
+              <button id="skip" class="button">今は聞けない</button>
+              <button id="nextMemo" class="button" hidden>台本の次の声メモを入れる</button>
+            </div>
           </div>
-          <ul id="people" class="people"></ul>
-          <details><summary>Claude に送った中身を見る</summary><pre id="sentRaw">まだ送っていません</pre></details>
+          <p id="workState" class="work-state" role="status" hidden></p>
+          <p id="talkMode" class="notice" hidden></p>
+          <div class="panel">
+            <h2>小さな頼みごと</h2>
+            <p class="hint">全部埋めなくて大丈夫です。まず1つ選びます。頼むのはご本人かご家族で、道具は相手に連絡しません。</p>
+            <div id="requests"></div>
+            <h3>気になること</h3>
+            <ul id="findings"></ul>
+          </div>
         </div>
-        <div class="panel">
-          <h2>1週間の様子（昼）</h2>
-          <div id="talkWeek"></div>
-          <h2 class="gap-top">計画</h2>
-          <p class="hint">どの欄も直せます。人が直した欄は、AI が上書きしません。</p>
-          <div id="conflicts"></div>
-          <div id="moveBar" class="move-bar" role="status" hidden><span id="moveText"></span> <button id="moveCancel" class="button" type="button">やめる</button></div>
-          <div id="planFields"></div>
-          <div id="planHelpers"></div>
+        <div class="talk-col">
+          <div class="panel">
+            <h2>声メモ</h2>
+            <p class="hint">押している間だけマイクが動き、声はブラウザの音声認識（Google）に送られます。名前は言わず、「娘さん」「隣の人」のように話してください。</p>
+            <details class="howto"><summary>使い方</summary>
+              <p class="hint">ご本人の話を聞いたら、確かめるつもりで復唱してください（「裏の部屋でお休みなんですね」）。音は残さず、文字だけを使います。出た文字を確かめて短く押すと、計画に入ります。入った欄には色が付くので、違っていれば別の欄へ移してください。欄に入らなかった声メモは、欄へドラッグして入れられます。</p>
+              <p class="hint">パソコンの Chrome か Edge で確かめています。スマホでの声の動作は、まだ確かめていません。</p>
+            </details>
+            <div class="row"><button id="mic" class="button mic" type="button">長押しで復唱／短く押して計画に入れる</button><span id="micState" class="hint" role="status"></span></div>
+            <div id="micKeyRow" class="row" hidden><span class="hint">キーでも同じ操作：<span id="micKey"></span></span><button id="micKeyChange" class="button" type="button">キーを変える</button></div>
+            <label for="memo" class="field-label">声メモの文字（その場で直せます）</label>
+            <textarea id="memo" rows="2"></textarea>
+            <div class="row"><button id="addMemo" class="button primary">計画に入れる</button></div>
+            <p id="memoError" class="error" role="alert" hidden></p>
+            <ol id="memos"></ol>
+            <details class="howto"><summary>話に出た人の名前（Claude に送りません）</summary>
+              <p class="hint">ここに入れた名前は、声メモで言ってしまっても送る前に呼び名へ置き換えます。入れていない名前は置き換えられません。入れただけでは「頼めた」になりません。頼めたら、計画の「近くの人」で印を付けてください。</p>
+              <div class="row">
+                <input id="personName" class="plan-input short" placeholder="名前" aria-label="名前">
+                <input id="personAlias" class="plan-input short" placeholder="呼び名（例：隣の人）" aria-label="呼び名">
+                <input id="personPhone" class="plan-input short" placeholder="電話（任意）" aria-label="電話">
+                <button id="addPerson" class="button">入れる</button>
+              </div>
+              <ul id="people" class="people"></ul>
+            </details>
+            <details><summary>Claude に送った中身を見る</summary><pre id="sentRaw">まだ送っていません</pre></details>
+          </div>
         </div>
-      </div>
-      <div class="panel">
-        <h2>小さな頼みごと</h2>
-        <p class="hint">全部埋めなくて大丈夫です。まず1つ選びます。頼むのはご本人かご家族で、道具は相手に連絡しません。</p>
-        <div id="requests"></div>
-        <h3>気になること</h3>
-        <ul id="findings"></ul>
+        <div class="talk-col wide">
+          <div class="panel">
+            <h2>1週間の様子（昼）</h2>
+            <div id="talkWeek"></div>
+            <h2 class="gap-top">計画</h2>
+            <p class="hint">どの欄も直せます。人が直した欄は、AI が上書きしません。欄の名前の下の小さな文字は、入る様式です。</p>
+            <div id="planStatus" class="plan-status" role="status"></div>
+            <div id="moveBar" class="move-bar" role="status" hidden><span id="moveText"></span> <button id="moveCancel" class="button" type="button">やめる</button></div>
+            <div id="planFields"></div>
+            <div id="planHelpers"></div>
+          </div>
+        </div>
       </div>
     </section>
     <section id="wrap" hidden>
+      <div class="wrap-layout">
+      <div class="wrap-col">
       <div class="panel">
         <h2>今日できたこと</h2>
         <ul id="doneList"></ul>
-        <h3>頼めましたか</h3>
+        <h3 id="askedHead">頼めましたか</h3>
         <div id="askedList"></div>
         <h2 class="gap-top">次の一歩</h2>
         <ul id="nextList"></ul>
-        <div class="row"><button id="backToTalk" class="button">話に戻る</button></div>
+        <div class="row"><button id="backToTalk" class="button">話に戻る</button><button id="wrapFormat" class="button">様式を変える</button></div>
       </div>
 
       <div class="panel">
@@ -175,19 +221,35 @@
         <div class="row"><button id="print" class="button primary">印刷する</button></div>
       </div>
 
+      </div>
+      <div class="wrap-col">
       <div class="panel">
-        <h2>市に渡すもの</h2>
-        <p class="notice">架空の村の決まりです。実際の同意の取り方と渡し方は、市の条例と法律の確認が必要です。同意は紙で確かめ、ここには結果だけ記録します。</p>
+        <h2 id="outputTitle">市に渡すもの</h2>
+        <p class="notice">架空の決まりです。実際の同意の取り方と渡し方は、市の条例と法律の確認が必要です。同意は紙で確かめ、ここには結果だけ記録します。</p>
+        <p id="requiredList" class="required-note" hidden></p>
         <h3>項目ごとの同意</h3>
+        <p id="consentReset" class="notice" hidden>様式を変えたので、渡す相手が変わりました。同意を聞き直してください。</p>
         <div id="consentRows"></div>
         <p id="csvBlocked" class="hint">同意した項目がないので、市向けの CSV は出ません。本人の1枚はこのまま渡せます。</p>
-        <p class="hint">手伝う人の同意がない間は、人の話が入った文を隠します。隠しきれない言い方もあるので、下の内容を読んで確かめてください。</p>
+        <p id="csvCheckHint" class="hint">手伝う人の同意がない間は、人の話が入った文を隠します。隠しきれない言い方もあるので、下の内容を読んで確かめてください。</p>
         <details open><summary>出す内容を確かめる</summary><div class="scroll"><table id="csvPreview"></table></div></details>
         <div class="row">
-          <button id="csvDownload" class="button primary">市向けの CSV を保存</button>
+          <button id="csvDownload" class="button primary">この様式の CSV を保存</button>
           <button id="resumeDownload" class="button">続き用ファイルを保存</button>
         </div>
         <p class="hint">続き用ファイルには名前や連絡先が入ります。保存した人の責任で扱ってください。画面を閉じると、この画面の内容は消えます。</p>
+        <p id="outsideList" class="notice" hidden></p>
+      </div>
+
+      <div id="inputPanel" class="panel" hidden>
+        <h2>介護ソフト用に書き出す</h2>
+        <p class="hint">入口の CSV と同じ見出しの新しいファイルを作ります。元のファイルは変えません。市に渡す同意とは別に、戻してよいかを確かめて記録します。入口の見出しにある欄だけを戻し、見出しの無い内容は保存しません。ソフトに取り込めるかは、ソフトの対応しだいです。文字コードは UTF-8 です。</p>
+        <div id="inputConsentRows"></div>
+        <ul id="inputChanges"></ul>
+        <p id="inputBlocked" class="hint">同意した項目がないので、介護ソフト用の CSV は保存しません。</p>
+        <div class="row"><button id="inputDownload" class="button primary">介護ソフト用の CSV を保存</button></div>
+      </div>
+      </div>
       </div>
     </section>
   </main>

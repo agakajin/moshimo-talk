@@ -1,5 +1,5 @@
 // サーバーの入口で、記号以外や、番号・日付・住所・名前の形を調べる。手元に無い値の照合はできないので、ブラウザの置き換えとあわせて守る
-import { looksLikeValue } from "../core/mask.js";
+import { CONTROL, looksLikeValue } from "../core/mask.js";
 import { createPlan } from "../core/plan.js";
 import { personalKind } from "../core/redact.js";
 
@@ -13,8 +13,9 @@ export function validateColumnsPayload(payload) {
   if (!Array.isArray(columns) || columns.length === 0 || columns.length > MAX_COLUMNS) {
     return ["列の一覧の形が正しくありません"];
   }
-  const extraTop = Object.keys(payload).filter((k) => k !== "columns");
+  const extraTop = Object.keys(payload).filter((k) => k !== "columns" && k !== "kind");
   if (extraTop.length > 0) errors.push("決まった項目以外が入っています");
+  if ("kind" in payload && payload.kind !== "output") errors.push("様式の種類が正しくありません");
 
   columns.forEach((c, i) => {
     const extra = Object.keys(c ?? {}).filter((k) => !["header", "withheld", "samples"].includes(k));
@@ -23,6 +24,9 @@ export function validateColumnsPayload(payload) {
       errors.push(`${i + 1}列目：見出しの形が正しくありません`);
     } else if (looksLikeValue(c.header)) {
       errors.push(`${i + 1}列目：見出しに本物の値らしいものがあります`);
+    } else if (CONTROL.test(c.header) || personalKind(c.header)) {
+      // 足した欄の見出しは訪問のたびに送る。あとで止めると直す場所がないので、ここで止める
+      errors.push(`${i + 1}列目：見出しに改行や名前らしいものがあります`);
     }
     if (!Array.isArray(c?.samples) || !c.samples.every((s) => typeof s === "string" && SYMBOL.test(s))) {
       errors.push(`${i + 1}列目：記号でない値が入っています`);
@@ -61,10 +65,15 @@ function hasUnknownKeys(plan) {
   const shape = createPlan();
   return Object.entries(plan).some(([section, value]) => {
     const sample = shape[section];
+    // 様式から足した欄は番号で持つ
+    if (section === "extra") return Object.keys(value ?? {}).some((k) => !/^x\d{1,3}$/.test(k));
     if (value === null || typeof value !== "object" || Array.isArray(value) || sample === null || typeof sample !== "object" || Array.isArray(sample) || "status" in sample) return false;
     return Object.keys(value).some((k) => !(k in sample));
   });
 }
+
+const MAX_FIELDS = 200;
+const validFields = (fields) => Array.isArray(fields) && fields.length <= MAX_FIELDS && fields.every((f) => f !== null && typeof f === "object" && Object.keys(f).length === 2 && /^extra\.x\d{1,3}$/.test(f.key) && typeof f.label === "string" && f.label.length <= MAX_HEADER && !CONTROL.test(f.label) && !looksLikeValue(f.label));
 
 function checkPlanPayload(payload, allowed) {
   const extra = Object.keys(payload ?? {}).filter((k) => !allowed.includes(k));
@@ -78,6 +87,8 @@ function checkPlanPayload(payload, allowed) {
   if (hasBigNumber(payload.plan)) return ["番号らしいものが入っています"];
   const helpers = payload.plan.helpers ?? [];
   if (!Array.isArray(helpers) || helpers.some((h) => Object.keys(h ?? {}).some((k) => !HELPER_KEYS.has(k)))) return ["手伝う人の形が正しくありません"];
+  if ("fields" in payload && !validFields(payload.fields)) return ["欄の一覧の形が正しくありません"];
+  if ("blanks" in payload && !(Array.isArray(payload.blanks) && payload.blanks.length <= MAX_FIELDS && payload.blanks.every((b) => typeof b === "string" && b.length <= MAX_HEADER && !CONTROL.test(b) && !looksLikeValue(b)))) return ["空の列の一覧の形が正しくありません"];
   if ("gaps" in payload && payload.gaps !== null && !(Array.isArray(payload.gaps) && payload.gaps.every((g) => /^[月火水木金土日]$/.test(g)))) return ["曜日の形が正しくありません"];
   for (const value of strings(payload)) {
     const kind = personalKind(value);
@@ -89,6 +100,6 @@ function checkPlanPayload(payload, allowed) {
 export function validateScribePayload(p) {
   if (typeof p?.memo !== "string" || p.memo.trim() === "") return ["声メモが空です"];
   if (p.memo.length > MAX_MEMO) return ["声メモが長すぎます。分けて入れてください"];
-  return checkPlanPayload(p, ["memo", "plan"]);
+  return checkPlanPayload(p, ["memo", "plan", "fields"]);
 }
-export const validateCheckPayload = (p) => checkPlanPayload(p, ["plan", "gaps"]);
+export const validateCheckPayload = (p) => checkPlanPayload(p, ["plan", "gaps", "blanks", "fields"]);

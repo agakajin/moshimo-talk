@@ -1,33 +1,13 @@
 // 訪問の画面。声メモは送る前に伏せ、送る中身をそのまま見せる
 import { applyUpdates, editField, fieldsBefore, moveField, placedFields, planForClaude, serviceGaps } from "/core/plan.js";
+import { blankColumns, planFieldList, requiredBlanks } from "/core/format.js";
+import { parseMinutes } from "/core/normalize.js";
 import { findLeaks, redact, redactDeep } from "/core/redact.js";
 import { nextTopic, REQUEST_NOTE } from "/core/talk.js";
 import { chooseKey, createPushToTalk, DEFAULT_KEY, keyCode, keyLabel, keyTriggers } from "/core/voice.js";
 import { createLatest, createQueue } from "/core/work.js";
 import { startWrap } from "/wrap.js";
 
-const FIELDS = [
-  ["hazards.items", "心配な災害"],
-  ["home.bedroom", "寝室"],
-  ["home.usualRoom", "普段いる部屋"],
-  ["home.aloneHours", "ひとりになる時間帯"],
-  ["home.community", "自治会名"],
-  ["evacuation.place", "逃げる先"],
-  ["evacuation.means", "手段"],
-  ["evacuation.route", "道のり"],
-  ["evacuation.prepMinutes", "準備（分）"],
-  ["evacuation.moveMinutes", "移動（分）"],
-  ["timeBands", "1週間の過ごし方"],
-  ["contactMeans", "知らせの受け方"],
-  ["carry", "持ち出し"],
-  ["considerations.items", "配慮すること"],
-  ["care.level", "要介護度"],
-  ["care.mobility", "歩き方"],
-  ["care.stairs", "階段の昇り降り"],
-  ["care.hearing", "聞こえ方"],
-  ["care.household", "同居の有無"],
-];
-const LABEL = new Map(FIELDS);
 const SOURCE = { csv: "CSV から", voice: "声メモから", human: "人が入れた" };
 const WEEK = ["月", "火", "水", "木", "金", "土", "日"];
 
@@ -58,12 +38,14 @@ async function post(url, body) {
 export function startTalk(state, { script = null } = {}) {
   const { identity, plan } = state;
   state.people ??= [];
+  let FIELDS = planFieldList(state);
+  let LABEL = new Map(FIELDS.map((f) => [f.path, f.label]));
+  // Claude に渡す、様式から足した欄の一覧
+  const extraFields = () => FIELDS.filter((f) => f.path.startsWith("extra.")).map((f) => ({ key: f.path, label: f.label }));
   const gaps = serviceGaps(plan);
   let scriptIndex = 0;
-  let config = null;
-  const loadConfig = () => fetch("/samples/hakka-village.config.json").then((r) => r.json()).then((c) => { config = c; }).catch(() => {});
-  loadConfig();
   const skipped = [];
+  const skippedFields = new Set();
   const shownInterrupts = new Set();
   let findings = [];
   let checkError = "";
@@ -77,8 +59,16 @@ export function startTalk(state, { script = null } = {}) {
   let latest = new Set();
   let freshHelpers = new Set();
   let moving = null;
+  // 欄に入らなかった声メモを、選んだ欄へ入れている間
+  let placing = null;
+  let dragged = null;
   const planRows = new Map();
+  let goalPaths = new Set();
   const helperRows = new Map();
+  const changeBoxes = new Map();
+  // 様式を変えて欄を作り直すとき、開いている箱を出し直すための控え
+  const changeRetry = new Map();
+  const placedNotes = new Map();
   const scribeQueue = createQueue();
   const checker = createLatest(runCheck);
   const refreshFindings = () => (pendingMemos > 0 ? Promise.resolve() : checker.request());
@@ -102,6 +92,13 @@ export function startTalk(state, { script = null } = {}) {
     }
   }
 
+  // CSV の「計画に無い欄」の値も、手元にある値として声メモや手直しから伏せる。短い値はふつうの言葉と重なるので除く
+  for (const f of Object.values(plan.extra ?? {})) {
+    if (f.source !== "csv" || typeof f.value !== "string" || f.value.trim().length < 3) continue;
+    known.unshift({ value: f.value, alias: "[手元の値]" });
+    secrets.push(f.value);
+  }
+
   $("talk").hidden = false;
   renderAll();
   renderPeople();
@@ -110,10 +107,54 @@ export function startTalk(state, { script = null } = {}) {
   function renderOpener() {
     const box = $("opener").closest(".opener");
     box.classList.toggle("interrupt", Boolean(interrupt));
-    const topic = nextTopic(plan, { gaps, skipped });
+    const topic = currentTopic();
     $("openerLabel").textContent = interrupt ? `気になること（${interrupt.yardstick}）` : "話のきっかけ";
     $("opener").textContent = interrupt?.opener ?? topic?.text ?? "ひと通り話せました。";
     $("skip").hidden = !topic && !interrupt;
+    renderGoal(interrupt ? null : topic);
+  }
+
+  // 最初の1問は暮らしの話から入る。分かっている寝室を言うので、二度聞かないことも伝わる
+  // 2問目からは必須の欄につながる話を先に聞く。用意した話が尽きたら、残りの必須の欄を直接聞く。必須でない話はそのあと
+  function currentTopic() {
+    if (memoCount === 0) {
+      const first = nextTopic(plan, { gaps, skipped });
+      if (first?.id === "hazards") return first;
+    }
+    const required = requiredBlanks(state);
+    const later = [];
+    for (;;) {
+      const topic = nextTopic(plan, { gaps, skipped: [...skipped, ...later] });
+      if (!topic) break;
+      if (topic.fills.some((p) => required.fields.has(p) || (p === "helpers" && required.helper))) return topic;
+      later.push(topic.id);
+    }
+    // 飛ばした話の欄は、言い方を変えて聞き直さない
+    const blank = [...required.fields.keys()].find((p) => !skippedFields.has(p));
+    if (blank) return { id: `blank:${blank}`, text: `${LABEL.get(blank) ?? blank}について、伺えますか？`, fills: [blank] };
+    return nextTopic(plan, { gaps, skipped });
+  }
+
+  // この話で埋めたい欄を見せる
+  function renderGoal(topic) {
+    goalPaths = new Set(topic?.fills ?? []);
+    const chips = [...goalPaths].map((path) => {
+      const name = path === "helpers" ? "近くの人" : LABEL.get(path);
+      if (!name) return null;
+      const button = el("button", { className: "chip", type: "button", textContent: name });
+      button.addEventListener("click", () => {
+        const target = planRows.get(path);
+        (target?.row ?? $("planHelpers")).scrollIntoView({ block: "center" });
+        target?.input.focus();
+      });
+      return button;
+    }).filter(Boolean);
+    $("openerGoal").replaceChildren(...(chips.length ? [el("span", { textContent: "この話で埋める欄：" }), ...chips] : interrupt ? [el("span", { textContent: "計画の穴を確かめる問いかけです" })] : []));
+    markGoal();
+  }
+
+  function markGoal() {
+    for (const [path, { row }] of planRows) row.classList.toggle("goal-row", goalPaths.has(path));
   }
 
   function renderWeek() {
@@ -125,62 +166,108 @@ export function startTalk(state, { script = null } = {}) {
     const days = WEEK.map((d) => {
       const here = items.filter((i) => i.days.includes(d));
       const isGap = gaps?.includes(d);
-      const text = here.length ? here.map((i) => `${i.kind} ${i.start}〜${i.end}`).join(" ") : isGap ? "昼はどなたが？" : "サービスなし";
-      return el("div", { className: `day ${here.length ? "covered" : isGap ? "gap" : ""}` }, el("b", { textContent: d }), text);
+      // 話に出た曜日は、聞けたと分かるようにする
+      const heard = isGap && [plan.home.aloneHours.value, plan.timeBands.value].some((v) => String(v ?? "").includes(d));
+      const text = here.length ? here.map((i) => `${i.kind} ${i.start}〜${i.end}`).join(" ") : heard ? "話に出ました" : isGap ? "昼はどなたが？" : "サービスなし";
+      return el("div", { className: `day ${here.length ? "covered" : isGap && !heard ? "gap" : ""}` }, el("b", { textContent: d }), text);
     });
     $("talkWeek").replaceChildren(el("div", { className: "week-wrap" }, el("div", { className: "week" }, ...days)));
   }
 
-  function movePlaced(to, options = {}) {
+  function finishMove(from, to, result) {
+    fresh.delete(from);
+    latest.delete(from);
+    fresh.set(to, result.replaced);
+    latest.add(to);
+    // 声メモの一覧の案内も、移した先に合わせる
+    const note = placedNotes.get(from);
+    if (note) {
+      note.textContent = note.textContent.replace(LABEL.get(from), `${LABEL.get(to)}（移しました）`);
+      placedNotes.delete(from);
+      placedNotes.set(to, note);
+    }
+    renderAll();
+    refreshFindings();
+  }
+
+  function movePlaced(to) {
     const from = moving;
-    const result = moveField(plan, from, to, { previous: fresh.get(from) ?? null, ...options });
+    const value = getAt(plan, from).value;
+    const previous = fresh.get(from) ?? null;
+    const result = moveField(plan, from, to, { previous });
     if (result.reason === "minutes") {
-      $("moveText").textContent = `「${getAt(plan, from).value}」は時間として読めないので、${LABEL.get(to)}には移せません。別の欄を選んでください。`;
+      $("moveText").textContent = `「${value}」は時間として読めないので、${LABEL.get(to)}には移せません。別の欄を選んでください。`;
       return;
     }
     if (result.reason === "occupied") {
       moving = null;
       renderAll();
-      askOverwrite(from, to, result.current);
+      askChange(to, result.current, value, (edited) => {
+        if (getAt(plan, from).value !== value) return "移す元の欄が変わったので、移せません。今のままにしてください。";
+        const done = moveField(plan, from, to, { previous, overwrite: true, value: edited });
+        if (done.reason === "minutes") return `「${edited}」は時間として読めません。数字で入れてください。`;
+        finishMove(from, to, done);
+        return null;
+      }, { focus: true });
       return;
     }
     if (!result.moved) return;
-    fresh.delete(from);
-    latest.delete(from);
-    fresh.set(to, result.replaced);
-    latest.add(to);
     moving = null;
-    renderAll();
+    finishMove(from, to, result);
     planRows.get(to).input.focus();
-    refreshFindings();
   }
 
-  function askOverwrite(from, to, current) {
-    const value = getAt(plan, from).value;
-    const yes = el("button", { className: "button", textContent: "こちらに変える" });
-    const box = el("p", { className: "notice" }, `${LABEL.get(to)}の「${current}」を「${value}」に変えますか？ `, yes);
-    yes.addEventListener("click", () => {
-      // 尋ねている間に欄が変わっていたら、古い話のまま変えない
-      if (getAt(plan, from).value !== value) {
-        box.replaceChildren("元の欄が変わったので、移すのをやめました。");
-        return;
-      }
-      const now = getAt(plan, to).value;
+  // 値のある欄を変えるときは、その欄のすぐ下で確かめる。提案はその場で直せる。1つの欄に箱は1つ
+  function askChange(path, current, proposed, apply, { focus = false } = {}) {
+    changeBoxes.get(path)?.remove();
+    const label = LABEL.get(path) ?? path;
+    let shown = current;
+    const nowText = () => `${label}：今は「${shown ?? "未決定"}」`;
+    const now = el("p", { textContent: nowText() });
+    const input = el("input", { className: "plan-input", value: proposed, ariaLabel: `${label}の変更後` });
+    const why = el("p", { className: "why", hidden: true });
+    const yes = el("button", { className: "button primary", type: "button", textContent: "この内容に変える" });
+    const no = el("button", { className: "button", type: "button", textContent: "今のままにする" });
+    const box = el("div", { className: "notice change-box" }, now, el("label", { className: "field-label" }, "変更後（直せます）", input), el("div", { className: "row" }, yes, no), why);
+    const say = (message) => {
+      why.textContent = message;
+      why.hidden = false;
+    };
+    const close = () => {
       box.remove();
-      if (now !== null && now !== current) {
-        askOverwrite(from, to, now);
+      if (changeBoxes.get(path) === box) changeBoxes.delete(path);
+      renderPlan();
+      planRows.get(path).input.focus();
+    };
+    no.addEventListener("click", close);
+    yes.addEventListener("click", () => {
+      const value = input.value.trim();
+      if (!value) {
+        say("変更後が空です。今のままにするか、内容を入れてください。");
         return;
       }
-      moving = from;
-      movePlaced(to, { overwrite: true });
+      // 尋ねている間に欄が変わっていたら、古い話のまま変えない
+      const latestValue = getAt(plan, path).value;
+      if (latestValue !== shown) {
+        shown = latestValue;
+        now.textContent = nowText();
+        say("欄の内容が変わりました。確かめて、もう一度押してください。");
+        return;
+      }
+      const problem = apply(value);
+      if (problem) say(problem);
+      else close();
     });
-    $("conflicts").append(box);
-    yes.focus();
+    planRows.get(path).row.after(box);
+    changeBoxes.set(path, box);
+    changeRetry.set(path, () => ({ path, proposed: input.value, apply }));
+    renderPlan();
+    if (focus) input.focus();
   }
 
   // 欄もボタンも作り直さず中身だけ変える。作り直すと、Tab で移った先や、押している途中のボタンが消える
   function buildPlanRows() {
-    for (const [path, label] of FIELDS) {
+    for (const { path, label, mark } of FIELDS) {
       const input = el("input", { className: "plan-input", placeholder: "未決定", ariaLabel: label });
       input.dataset.path = path;
       input.addEventListener("change", () => {
@@ -193,6 +280,7 @@ export function startTalk(state, { script = null } = {}) {
       // 打っている間に届いた答えは、欄を離れたときに見せる
       input.addEventListener("blur", () => { input.value = getAt(plan, path).value ?? ""; });
       const note = el("span");
+      const badge = el("span", { className: "badge", hidden: true });
       const move = el("button", { className: "button mini", type: "button", textContent: "移す", ariaLabel: `${label}の内容を別の欄へ移す` });
       move.addEventListener("click", () => {
         moving = path;
@@ -200,12 +288,29 @@ export function startTalk(state, { script = null } = {}) {
         $("moveCancel").focus();
       });
       const here = el("button", { className: "button mini", type: "button", textContent: "ここへ", ariaLabel: `${label}へ移す` });
-      const row = el("div", {}, el("span", { className: "name", textContent: label }), input, el("span", { className: "source" }, note, move, here));
+      const row = el("div", {}, el("span", { className: "name" }, label, badge, el("small", { className: "mark", textContent: mark })), input, el("span", { className: "source" }, note, move, here));
       // 移している間は、行のどこを押しても行き先になる
       row.addEventListener("click", () => {
-        if (moving && moving !== path) movePlaced(path);
+        if (placing) {
+          const memo = placing;
+          placing = null;
+          renderAll();
+          placeMemo(path, memo);
+        } else if (moving && moving !== path) movePlaced(path);
       });
-      planRows.set(path, { row, input, note, move, here });
+      row.addEventListener("dragover", (e) => {
+        if (!dragged) return;
+        e.preventDefault();
+        row.classList.add("drop");
+      });
+      row.addEventListener("dragleave", () => row.classList.remove("drop"));
+      row.addEventListener("drop", (e) => {
+        if (!dragged) return;
+        e.preventDefault();
+        row.classList.remove("drop");
+        placeMemo(path, dragged);
+      });
+      planRows.set(path, { row, input, note, move, here, badge });
       $("planFields").append(row);
     }
   }
@@ -239,6 +344,29 @@ export function startTalk(state, { script = null } = {}) {
     return parts;
   }
 
+  // 残りを一覧で見せる。押すとその欄へ移る
+  function renderStatus({ fields, local, helper }) {
+    const goTo = (target) => {
+      target.row?.scrollIntoView({ block: "center" });
+      target.focus?.focus();
+    };
+    const chip = (text, className, target) => {
+      const button = el("button", { className: `chip ${className}`, type: "button", textContent: text });
+      button.addEventListener("click", () => goTo(target));
+      return button;
+    };
+    const confirms = [...changeBoxes].map(([path, box]) => chip(`確認：${LABEL.get(path) ?? path}`, "confirm", { row: planRows.get(path).row, focus: box.querySelector("input") }));
+    const blanks = [...fields.keys()].map((path) => chip(LABEL.get(path) ?? path, "", { row: planRows.get(path).row, focus: planRows.get(path).input }));
+    if (helper) blanks.push(chip(`${helper}（頼めた人）`, "", { row: $("planHelpers"), focus: null }));
+    const mustCount = blanks.length;
+    const count = mustCount + confirms.length === 0
+      ? el("p", { className: "count done", textContent: "必須の欄はすべて入りました。確認もありません" })
+      : el("p", { className: "count", textContent: `残り：必須 ${mustCount}件／確認 ${confirms.length}件` });
+    const notes = local.map((name) => el("span", { className: "chip plain", textContent: `${name}（手元の情報）` }));
+    $("planStatus").hidden = Boolean(moving || placing);
+    $("planStatus").replaceChildren(count, el("div", { className: "chips" }, ...confirms, ...blanks, ...notes));
+  }
+
   function renderPeople() {
     // 名前は画面の中だけ。呼び名で一覧に出す
     $("people").replaceChildren(...state.people.map((p) => el("li", { textContent: `${p.alias}：入力ずみ` })));
@@ -246,19 +374,30 @@ export function startTalk(state, { script = null } = {}) {
 
   function renderPlan() {
     if (planRows.size === 0) buildPlanRows();
-    for (const [path, { row, input, note, move, here }] of planRows) {
+    const required = requiredBlanks(state);
+    for (const [path, { row, input, note, move, here, badge }] of planRows) {
       const f = getAt(plan, path);
       const isLatest = latest.has(path);
-      row.className = `plan-row ${f.status}${isLatest ? " fresh" : ""}${moving === path ? " moving" : ""}${moving && moving !== path ? " target" : ""}`;
+      const isRequired = required.fields.has(path);
+      const confirming = changeBoxes.has(path);
+      const choosing = moving || placing;
+      row.className = `plan-row ${f.status}${isRequired ? " required" : ""}${confirming ? " confirming" : ""}${isLatest ? " fresh" : ""}${moving === path ? " moving" : ""}${choosing && moving !== path ? " target" : ""}`;
+      badge.hidden = !isRequired && !confirming;
+      badge.textContent = confirming ? "確認" : "必須";
+      badge.className = confirming ? "badge confirm" : "badge";
+      input.placeholder = isRequired ? "未記入" : "未決定";
       // 打っている欄の文字は消さない。移している間は打っていないので、行き先にも値を見せる
       if (document.activeElement !== input || input.readOnly) input.value = f.value ?? "";
-      input.readOnly = Boolean(moving);
-      note.textContent = moving === path ? "これを移します" : moving ? "" : isLatest ? (f.source === "human" ? "移しました" : "いま入った") : SOURCE[f.source] ?? "";
-      move.hidden = Boolean(moving) || !fresh.has(path) || f.status !== "filled";
-      here.hidden = !moving || moving === path;
+      input.readOnly = Boolean(choosing);
+      note.textContent = moving === path ? "これを移します" : choosing ? "" : isLatest ? (f.source === "human" ? "移しました" : "いま入った") : SOURCE[f.source] ?? "";
+      move.hidden = Boolean(choosing) || !fresh.has(path) || f.status !== "filled";
+      here.hidden = !choosing || moving === path;
     }
-    $("moveBar").hidden = !moving;
+    renderStatus(required);
+    $("moveBar").hidden = !moving && !placing;
     if (moving) $("moveText").textContent = `「${getAt(plan, moving).value}」を、どの欄に移しますか？`;
+    if (placing) $("moveText").textContent = `「${placing.memo}」を、どの欄に入れますか？`;
+    markGoal();
     const rows = plan.helpers.map((h) => {
       const parts = helperRow(h);
       const isFresh = freshHelpers.has(h.alias);
@@ -340,14 +479,15 @@ export function startTalk(state, { script = null } = {}) {
     renderWork();
     renderRequests();
     try {
-      const body = guarded({ plan: planToSend(), gaps });
+      const body = guarded({ plan: planToSend(), gaps, blanks: blankColumns(state.output, plan), fields: extraFields() });
       showSent("点検役へ", body);
       const data = await post("/api/check", body);
       if (outdated()) return;
       markMode(data.mode);
       findings = data.findings;
       checkError = "";
-      interrupt = findings.find((f) => f.interrupt && !shownInterrupts.has(f.id)) ?? null;
+      // 話を始める前に割り込まない。最初の一言は話のきっかけから入る
+      interrupt = memoCount > 0 ? findings.find((f) => f.interrupt && !shownInterrupts.has(f.id)) ?? null : null;
       if (interrupt) shownInterrupts.add(interrupt.id);
     } catch (e) {
       if (outdated()) return;
@@ -390,14 +530,14 @@ export function startTalk(state, { script = null } = {}) {
     renderWork();
     scribeQueue.add(async () => {
       try {
-        const body = guarded({ memo, plan: planToSend() });
+        const body = guarded({ memo, plan: planToSend(), fields: extraFields() });
         showSent("書き取り役へ", body);
         const data = await post("/api/scribe", body);
         markMode(data.mode);
         memoCount += 1;
         const before = fieldsBefore(plan, data.updates);
         const conflicts = applyUpdates(plan, data.updates, memoCount, { late });
-        appendConflicts(conflicts);
+        askConflicts(conflicts);
         // 移している途中でも、話は続くので操作は止めない。前の欄もあとから移せるよう足していく
         const placedNow = placedFields(plan, before, memoCount);
         for (const [path, previous] of placedNow) fresh.set(path, previous);
@@ -412,8 +552,13 @@ export function startTalk(state, { script = null } = {}) {
         for (const { value } of helpersNow) {
           if (value.declined && plan.helpers.some((h) => h.alias === value.alias && h.asked)) item.append(el("small", { className: "placed", textContent: `→ ${value.alias}は断られたようです。「頼めた」の印を確かめてください` }));
         }
-        if (names.length > 0) item.append(el("small", { className: "placed", textContent: `→ ${names.join("、")}に入りました` }));
-        else if (conflicts.length === 0 && !data.updates.some((u) => u.path.endsWith(".noOthers"))) item.append(el("small", { className: "placed", textContent: "→ どの欄にも入りませんでした。文字を確かめるか、欄に直接入れてください" }));
+        if (names.length > 0) {
+          const note = el("small", { className: "placed", textContent: `→ ${names.join("、")}に入りました` });
+          item.append(note);
+          for (const path of placedNow.keys()) placedNotes.set(path, note);
+        }
+        if (conflicts.length > 0) item.append(el("small", { className: "placed", textContent: `→ ${conflicts.map((c) => LABEL.get(c.path) ?? c.path).join("、")}：今の内容と違うので、確認が出ています` }));
+        if (names.length === 0 && conflicts.length === 0 && !data.updates.some((u) => u.path.endsWith(".noOthers"))) makeLoose(item, memo);
         if (data.dropped > 0) item.append(el("small", { className: "hint", textContent: ` 一部は根拠を確かめられず、計画に入れていません。欄を確かめてください。` }));
         interrupt = null;
       } catch (e) {
@@ -438,30 +583,82 @@ export function startTalk(state, { script = null } = {}) {
     });
   }
 
-  function appendConflicts(conflicts) {
-    $("conflicts").append(...conflicts.map((c) => {
-      const yes = el("button", { className: "button", textContent: "こちらに変える" });
-      const box = el("p", { className: "notice" }, `「${c.current}」を「${c.proposed}」に変えますか？ `, yes);
-      yes.addEventListener("click", () => {
-        editField(plan, c.path, c.proposed);
-        box.remove();
+  // 欄に入らなかった声メモ。ドラッグか「欄へ入れる」で、人が入れる先を決める
+  function makeLoose(item, memo) {
+    const note = el("small", { className: "placed", textContent: "→ 欄には入りませんでした。欄へドラッグできます " });
+    const button = el("button", { className: "button mini", type: "button", textContent: "欄へ入れる" });
+    const loose = { item, memo, note, button };
+    note.append(button);
+    item.append(note);
+    item.classList.add("loose");
+    item.draggable = true;
+    button.addEventListener("click", () => {
+      moving = null;
+      placing = loose;
+      renderAll();
+      $("moveCancel").focus();
+    });
+    item.addEventListener("dragstart", (e) => {
+      if (!item.draggable) return;
+      dragged = loose;
+      e.dataTransfer.setData("application/x-hinan-memo", "memo");
+      e.dataTransfer.effectAllowed = "move";
+      $("planFields").classList.add("dropping");
+    });
+    item.addEventListener("dragend", () => {
+      dragged = null;
+      $("planFields").classList.remove("dropping");
+    });
+  }
+
+  function placeMemo(path, { item, memo, note, button }) {
+    const label = LABEL.get(path) ?? path;
+    const f = getAt(plan, path);
+    const put = (value) => {
+      if (path.endsWith("Minutes") && parseMinutes(value) === null) return `「${value}」は時間として読めません。数字で入れてください。`;
+      const previous = { ...f };
+      editField(plan, path, value);
+      fresh.set(path, previous);
+      latest = new Set([path]);
+      item.classList.remove("loose");
+      item.draggable = false;
+      button.remove();
+      note.textContent = `→ ${label}に入れました`;
+      placedNotes.set(path, note);
+      renderAll();
+      refreshFindings();
+      return null;
+    };
+    // 値がある欄、時間の欄、置き換えの記号が残る文は、その場で直してから入れる
+    if (f.status === "filled" || path.endsWith("Minutes") || /\[(?:お名前|住所|日付|電話番号|郵便番号)\]/.test(memo)) askChange(path, f.value, memo, put, { focus: true });
+    else put(memo);
+  }
+
+  function askConflicts(conflicts) {
+    for (const c of conflicts) {
+      askChange(c.path, c.current, c.proposed, (value) => {
+        if (c.path.endsWith("Minutes") && parseMinutes(value) === null) return `「${value}」は時間として読めません。数字で入れてください。`;
+        editField(plan, c.path, value);
+        fresh.delete(c.path);
+        latest.delete(c.path);
         renderAll();
         refreshFindings();
+        return null;
       });
-      return box;
-    }));
+    }
   }
 
   $("addMemo").addEventListener("click", addMemo);
   const cancelMove = () => {
     const from = moving;
     moving = null;
+    placing = null;
     renderAll();
     planRows.get(from)?.move.focus();
   };
   $("moveCancel").addEventListener("click", cancelMove);
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && moving) cancelMove();
+    if (e.key === "Escape" && (moving || placing)) cancelMove();
   });
   $("addPerson").addEventListener("click", () => {
     const name = $("personName").value.trim();
@@ -505,19 +702,13 @@ export function startTalk(state, { script = null } = {}) {
       await checker.idle().catch(() => {});
       if (checkError) await checker.request().catch(() => {});
     })();
-    // 待ち続けない。残りは帰る前の画面で知らせる
+    // 待ち続けない。残りは訪問終了の画面で知らせる
     await Promise.race([work, new Promise((resolve) => setTimeout(resolve, WRAP_WAIT))]);
-    if (!config) await loadConfig();
     $("goWrap").disabled = false;
-    if (!config) {
-      $("memoError").textContent = "画面の設定を読めませんでした。電波を確かめて、もう一度押してください。";
-      $("memoError").hidden = false;
-      return;
-    }
     state.checkFailed = Boolean(checkError);
     // 復唱して、計画に入れ忘れた文字も数える
     state.unfinishedMemos = () => $("memos").querySelectorAll(".pending, .failed").length + ($("memo").value.trim() ? 1 : 0);
-    startWrap(state, findings, config);
+    startWrap(state, findings, state.output);
   });
   $("skip").addEventListener("click", () => {
     if (interrupt) {
@@ -526,13 +717,34 @@ export function startTalk(state, { script = null } = {}) {
       renderOpener();
       return;
     }
-    const topic = nextTopic(plan, { gaps, skipped });
+    const topic = currentTopic();
     if (topic) {
       skipped.push(topic.id);
+      topic.fills.forEach((p) => skippedFields.add(p));
       plan.nextSteps.push({ topic: topic.id, text: topic.text });
     }
     renderOpener();
   });
+
+  // 様式を変えても、話した内容は残す。欄の並びと名前だけを作り直す
+  state.refreshFormat = () => {
+    const open = [...changeBoxes.keys()].map((path) => changeRetry.get(path)());
+    const before = LABEL;
+    FIELDS = planFieldList(state);
+    // 確かめている途中の欄は、新しい様式に無くても消さない
+    for (const { path } of open) {
+      if (!FIELDS.some((f) => f.path === path)) FIELDS.push({ path, label: before.get(path) ?? path, kind: null, mark: "様式の外" });
+    }
+    LABEL = new Map(FIELDS.map((f) => [f.path, f.label]));
+    moving = null;
+    changeBoxes.clear();
+    changeRetry.clear();
+    planRows.clear();
+    $("planFields").replaceChildren();
+    renderAll();
+    for (const { path, proposed, apply } of open) askChange(path, getAt(plan, path).value, proposed, apply);
+    refreshFindings();
+  };
 
   micTalk = startMic(addMemo);
 }

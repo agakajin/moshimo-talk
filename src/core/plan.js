@@ -14,6 +14,8 @@ export function createPlan() {
     contactMeans: field(),
     carry: field(),
     considerations: { items: field(), noOthers: false },
+    // 様式にあって計画の欄に無いもの。見出しは手元に置き、ここは番号で持つ
+    extra: {},
     helpers: [],
     requests: [],
     requestsDone: [],
@@ -23,6 +25,15 @@ export function createPlan() {
       care: "unasked",
       evacuation: "unasked",
       helper: "unasked",
+      other: "unasked",
+    },
+    // 介護ソフトへ戻してよいか。市に渡す同意とは相手が違うので分ける
+    consentInput: {
+      contact: "unasked",
+      care: "unasked",
+      evacuation: "unasked",
+      helper: "unasked",
+      other: "unasked",
     },
   };
 }
@@ -48,7 +59,22 @@ export function importRow({ headers, row, mapping, source = "csv" }) {
   const identity = {};
   const plan = createPlan();
   const raw = {};
-  headers.forEach((h, i) => { if (mapping[h]) raw[mapping[h]] = (row[i] ?? "").trim(); });
+  const resolved = { ...mapping };
+  const customs = [];
+  headers.forEach((h, i) => {
+    if (!mapping[h]) return;
+    const value = (row[i] ?? "").trim();
+    // 計画に無い列は、聞く欄として足す
+    if (mapping[h] === "new") {
+      const key = `x${customs.length + 1}`;
+      plan.extra[key] = field();
+      if (value) setField(plan, `extra.${key}`, value, source);
+      customs.push({ key, path: `extra.${key}`, label: h });
+      resolved[h] = `extra.${key}`;
+      return;
+    }
+    raw[mapping[h]] = value;
+  });
 
   for (const [key, normalize] of Object.entries(IDENTITY)) {
     if (raw[key]) identity[key] = normalize(raw[key]);
@@ -60,7 +86,9 @@ export function importRow({ headers, row, mapping, source = "csv" }) {
     if (raw[path]) setField(plan, path, raw[path], source);
   }
 
-  return { identity, plan, notes: raw.notes ?? "", people: [] };
+  // 手で入れたときは入口の様式が無いので、入口へは書き出さない
+  const input = source === "csv" ? { headers, row, mapping: resolved } : null;
+  return { identity, plan, notes: raw.notes ?? "", people: [], customs, input };
 }
 
 export function serviceGaps(plan) {
@@ -73,6 +101,8 @@ export function serviceGaps(plan) {
 export function planForClaude(plan) {
   const copy = structuredClone(plan);
   if (copy.care.weekly.value) delete copy.care.weekly.value.unread;
+  // CSV の「計画に無い欄」は中身が分からない（主治医の名前や番号のこともある）ので、値は手元に残す
+  for (const f of Object.values(copy.extra ?? {})) if (f.source === "csv" && f.value !== null) f.value = "手元にあります";
   return copy;
 }
 
@@ -133,23 +163,25 @@ export function placedFields(plan, before, memoId) {
 }
 
 // 入れ間違いを人が別の欄へ移す。元の欄は入る前に戻し、行き先に別の値があれば overwrite のときだけ変える
-export function moveField(plan, from, to, { previous = null, overwrite = false } = {}) {
+export function moveField(plan, from, to, { previous = null, overwrite = false, value: edited = null } = {}) {
   const source = getAt(plan, from);
   const target = getAt(plan, to);
-  const value = source.value;
+  const original = source.value;
+  // 確認の箱で人が直した値があれば、それを入れる
+  const value = edited ?? original;
   if (from === to || source.status !== "filled") return { moved: false, reason: "empty" };
   if (to.endsWith("Minutes") && parseMinutes(value) === null) return { moved: false, reason: "minutes" };
   if (target.status === "filled" && target.value !== value && !overwrite) return { moved: false, reason: "occupied", current: target.value };
   const replaced = { ...target };
   // 同じ話を2回入れていたときは、前の値も入れ間違いなので空に戻す
-  Object.assign(source, previous && previous.value !== value ? previous : { value: null, status: "undecided", source: null, memoId: null });
+  Object.assign(source, previous && previous.value !== original ? previous : { value: null, status: "undecided", source: null, memoId: null });
   Object.assign(target, { value, status: "filled", source: "human", memoId: null });
   return { moved: true, replaced };
 }
 
 // 続き用ファイル。本人を特定する情報を含むので、書き出した人の責任で扱う
-export function toResumeFile({ identity, plan, notes, people }) {
-  return { kind: "hinan-hanashi-resume", version: 1, identity, plan, notes, people };
+export function toResumeFile({ identity, plan, notes, people, customs = [], input = null, output = null }) {
+  return { kind: "hinan-hanashi-resume", version: 1, identity, plan, notes, people, customs, input, output };
 }
 
 function mergeShape(base, loaded) {
@@ -169,5 +201,14 @@ export function fromResumeFile(data) {
   }
   for (const key of ["timeBands", "contactMeans", "carry"]) if (data.plan?.[key]) plan[key] = data.plan[key];
   for (const key of ["hazards", "considerations"]) if (data.plan?.[key]?.items) plan[key].items = data.plan[key].items;
-  return { identity: data.identity ?? {}, plan, notes: data.notes ?? "", people: Array.isArray(data.people) ? data.people : [] };
+  plan.extra = data.plan?.extra ?? {};
+  return {
+    identity: data.identity ?? {},
+    plan,
+    notes: data.notes ?? "",
+    people: Array.isArray(data.people) ? data.people : [],
+    customs: Array.isArray(data.customs) ? data.customs : [],
+    input: data.input ?? null,
+    output: data.output ?? null,
+  };
 }

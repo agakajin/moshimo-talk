@@ -2,6 +2,7 @@
 import { decodeCsv, parseCsv } from "/core/csv.js";
 import { maskTable } from "/core/mask.js";
 import { findLeaks } from "/core/redact.js";
+import { attachOutput, checkResumedFormat, DEFAULT_TARGETS, duplicateHeaders, OUTPUT_TARGETS, suspiciousHeaders } from "/core/format.js";
 import { fromResumeFile, importRow, serviceGaps } from "/core/plan.js";
 import { startTalk } from "/talk.js";
 
@@ -25,6 +26,7 @@ const TARGETS = {
   "emergency.name": "緊急連絡先の氏名",
   "emergency.phone": "緊急連絡先の電話",
   notes: "備考（Claude に送らない）",
+  new: "計画に無い欄（話の中で聞く）",
   ignore: "使わない",
   unknown: "分からない（選んでください）",
 };
@@ -56,17 +58,35 @@ const MANUAL_FIELDS = [
   ["home.usualRoom", "普段いる部屋"], ["home.bedroom", "寝室"], ["care.household", "同居の有無"], ["home.hazardNote", "家の中と周辺の危険個所"],
 ];
 
-function beginTalk(imported, options = {}) {
+async function loadVillage() {
+  state.village ??= await fetch("/samples/hakka-village.config.json").then((r) => r.json());
+  return state.village;
+}
+
+const defaultColumns = (village) => village.columns.map((header) => ({ header, target: DEFAULT_TARGETS[header] ?? "unknown" }));
+
+async function beginTalk(imported, options = {}) {
   state.imported = imported;
-  for (const id of ["step1", "step2", "step3", "step4", "manual"]) $(id).hidden = true;
+  try {
+    // 様式を選ばずに始めたときは、ハッカ村の様式にする
+    if (!imported.output) {
+      const village = await loadVillage();
+      attachOutput(imported, { base: village, columns: defaultColumns(village) });
+    }
+  } catch {
+    showError($("fileError"), "画面の設定を読めませんでした。もう一度押してください。");
+    return;
+  }
+  for (const id of ["step1", "step2", "step3", "step4", "step5", "manual"]) $(id).hidden = true;
   document.querySelector(".steps").hidden = true;
+  document.body.classList.add("wide-mode");
   document.querySelector(".top h1").textContent = "訪問";
   document.querySelector(".top p").textContent = "話を聞いて、段取りと次の一歩を決めます。決めるのはご本人です。";
   startTalk(imported, options);
 }
 
 function goTo(step) {
-  for (let i = 1; i <= 4; i++) {
+  for (let i = 1; i <= 5; i++) {
     $(`step${i}`).hidden = i > step;
     const mark = document.querySelector(`.steps [data-step="${i}"]`);
     mark.classList.toggle("current", i === step);
@@ -80,6 +100,11 @@ function loadBytes(bytes) {
   const table = parseCsv(decodeCsv(bytes));
   if (table.headers.length === 0 || table.rows.length === 0) {
     showError($("fileError"), "見出しとデータのある CSV を選んでください。");
+    return;
+  }
+  const repeated = duplicateHeaders(table.headers);
+  if (repeated.length > 0) {
+    showError($("fileError"), `同じ見出しが2つあります：${repeated.join("、")}。見出しを分けてから選んでください。`);
     return;
   }
   state.table = table;
@@ -112,6 +137,7 @@ function renderMask() {
 async function sendColumns() {
   showError($("sendError"), "");
   $("send").disabled = true;
+  $("sendState").hidden = false;
   try {
     const res = await fetch("/api/read-columns", {
       method: "POST",
@@ -129,6 +155,7 @@ async function sendColumns() {
     showError($("sendError"), `送れませんでした。${e.message}`);
   } finally {
     $("send").disabled = false;
+    $("sendState").hidden = true;
   }
 }
 
@@ -167,7 +194,13 @@ function confirmMapping() {
       return;
     }
     if (s.value === "ignore") continue;
-    if (used.has(s.value)) {
+    // 足した欄の見出しは訪問のたびに送る。あとで止まると直す場所がない
+    if (s.value === "new" && suspiciousHeaders([s.dataset.header]).length > 0) {
+      showError($("confirmError"), `「${s.dataset.header}」は名前や番号と間違えやすいので、計画に無い欄にできません。「使わない」を選んでください。`);
+      return;
+    }
+    // 計画に無い欄は、列ごとに別の欄として足す
+    if (s.value !== "new" && used.has(s.value)) {
       showError($("confirmError"), `「${s.dataset.header}」と「${used.get(s.value)}」が同じ欄になっています。`);
       return;
     }
@@ -175,8 +208,119 @@ function confirmMapping() {
     mapping[s.dataset.header] = s.value;
   }
   state.imported = importRow({ headers: state.table.headers, row: state.table.rows[Number($("who").value) || 0], mapping });
-  renderResult(state.imported);
+  chooseFormat("ハッカ村", null);
   goTo(4);
+}
+
+// 様式の見出しを、内容と結びつける。ここで人が確かめる
+async function chooseFormat(name, headers) {
+  showError($("formatError"), "");
+  $("formatSend").hidden = true;
+  $("formatNotice").hidden = true;
+  $("formatGo").disabled = true;
+  // 選んでいる様式を光らせ、読んでいる間は押せないようにする
+  const choices = [$("formatDefault"), $("formatMint")];
+  choices.forEach((b) => { b.disabled = true; });
+  $("formatDefault").classList.toggle("primary", !headers);
+  $("formatMint").classList.toggle("primary", name === "ミント市");
+  $("formatState").hidden = !headers;
+  try {
+    const village = await loadVillage();
+    let columns = defaultColumns(village);
+    if (headers) {
+      const res = await fetch("/api/read-columns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "output", columns: headers.map((header) => ({ header, withheld: false, samples: [] })) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data.errors ?? ["読み取れませんでした"]).join(" / "));
+      columns = data.results;
+      $("formatNotice").hidden = data.mode !== "mock";
+      $("formatNotice").textContent = "今は Claude につないでいません。見出しの言葉から作った仮の答えです。";
+    }
+    state.formatName = name;
+    renderFormat(columns);
+    $("formatGo").disabled = false;
+  } catch (e) {
+    $("formatTable").replaceChildren();
+    showError($("formatError"), `様式を読めませんでした。${e.message}`);
+  } finally {
+    choices.forEach((b) => { b.disabled = false; });
+    $("formatState").hidden = true;
+  }
+}
+
+function renderFormat(columns) {
+  const table = $("formatTable");
+  table.replaceChildren(el("tr", {}, el("th", { textContent: `${state.formatName}の列` }), el("th", { textContent: "入れる内容" })));
+  for (const { header, target } of columns) {
+    const select = el("select", { ariaLabel: `${header} に入れる内容` });
+    select.dataset.header = header;
+    for (const [value, label] of Object.entries({ ...OUTPUT_TARGETS, unknown: "分からない（選んでください）" })) select.append(el("option", { value, textContent: label }));
+    select.value = target in OUTPUT_TARGETS ? target : "unknown";
+    const row = el("tr", { className: select.value === "unknown" ? "unknown" : "" }, el("td", { textContent: header }), el("td", {}, select));
+    select.addEventListener("change", () => row.classList.toggle("unknown", select.value === "unknown"));
+    table.append(row);
+  }
+}
+
+async function confirmFormat() {
+  showError($("formatError"), "");
+  const selects = [...$("formatTable").querySelectorAll("select")];
+  const unknown = selects.find((s) => s.value === "unknown");
+  if (unknown) {
+    showError($("formatError"), `「${unknown.dataset.header}」に入れる内容を選んでください。分からなければ「空のまま出す」を選べます。`);
+    return;
+  }
+  const village = await loadVillage();
+  attachOutput(state.imported, {
+    base: village,
+    name: state.formatName,
+    columns: selects.map((s) => ({ header: s.dataset.header, target: s.value })),
+  });
+  // 訪問の途中で変えたときは、話の画面へ戻る
+  if (state.backToTalk) {
+    state.imported.refreshFormat();
+    closeFormat();
+    return;
+  }
+  renderResult(state.imported);
+  goTo(5);
+}
+
+// 今の様式を開き直す。足した欄は「計画に無い欄」として見せる
+function reopenFormat() {
+  const { output, customs = [] } = state.imported;
+  const fromExtra = (target) => (customs.some((c) => c.path === target) ? "new" : target);
+  state.formatName = output.name ?? "ハッカ村";
+  renderFormat(output.columns.map((header) => ({ header, target: fromExtra(output.targets[header]) })));
+  $("formatDefault").classList.toggle("primary", state.formatName === "ハッカ村");
+  $("formatMint").classList.toggle("primary", state.formatName === "ミント市");
+  $("formatNotice").hidden = true;
+  showError($("formatError"), "");
+  $("formatGo").disabled = false;
+}
+
+// 訪問の途中から様式の画面を開く。話した内容はそのまま
+function openFormat() {
+  state.backToTalk = true;
+  reopenFormat();
+  $("talk").hidden = true;
+  $("wrap").hidden = true;
+  $("step4").hidden = false;
+  document.body.classList.remove("wide-mode");
+  window.scrollTo(0, 0);
+}
+
+function closeFormat() {
+  state.backToTalk = false;
+  document.querySelector(".top h1").textContent = "訪問";
+  document.querySelector(".top p").textContent = "話を聞いて、段取りと次の一歩を決めます。決めるのはご本人です。";
+  $("step4").hidden = true;
+  $("talk").hidden = false;
+  document.body.classList.add("wide-mode");
+  window.scrollTo(0, 0);
 }
 
 function renderResult({ identity, plan, notes }) {
@@ -248,6 +392,54 @@ document.querySelectorAll("[data-sample]").forEach((b) => b.addEventListener("cl
   loadBytes(new Uint8Array(await res.arrayBuffer()));
 }));
 $("send").addEventListener("click", sendColumns);
+$("formatDefault").addEventListener("click", () => chooseFormat("ハッカ村", null));
+$("formatMint").addEventListener("click", async () => {
+  try {
+    const res = await fetch("/samples/mint-city.format.csv");
+    chooseFormat("ミント市", parseCsv(decodeCsv(new Uint8Array(await res.arrayBuffer()))).headers);
+  } catch {
+    showError($("formatError"), "様式を読めませんでした。もう一度押してください。");
+  }
+});
+$("formatFile").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  const { headers } = parseCsv(decodeCsv(new Uint8Array(await file.arrayBuffer())));
+  $("formatSend").hidden = true;
+  $("formatGo").disabled = true;
+  $("formatTable").replaceChildren();
+  showError($("formatError"), "");
+  if (headers.length === 0) {
+    showError($("formatError"), "見出しのある CSV を選んでください。");
+    return;
+  }
+  const repeated = duplicateHeaders(headers);
+  if (repeated.length > 0) {
+    showError($("formatError"), `同じ見出しが2つあります：${repeated.join("、")}。「本人の氏名」「支援者の氏名」のように分けてから選んでください。`);
+    return;
+  }
+  const suspicious = suspiciousHeaders(headers, state.imported ?? {});
+  if (suspicious.length > 0) {
+    showError($("formatError"), `見出しに改行や、名前、番号らしいものがあるので、送らずに止めました：${suspicious.join("、")}`);
+    return;
+  }
+  // 取り込みと同じく、送る前に中身を見せる
+  $("formatSendList").textContent = headers.join("、");
+  $("formatSendGo").onclick = () => chooseFormat(file.name.replace(/\.csv$/i, ""), headers);
+  $("formatSend").hidden = false;
+});
+$("formatGo").addEventListener("click", confirmFormat);
+$("formatBack").addEventListener("click", () => {
+  if (state.backToTalk) closeFormat();
+  else goTo(state.table ? 3 : 1);
+});
+$("stepFormat").addEventListener("click", () => {
+  reopenFormat();
+  goTo(4);
+});
+$("changeFormat").addEventListener("click", openFormat);
+$("wrapFormat").addEventListener("click", openFormat);
 $("confirm").addEventListener("click", confirmMapping);
 $("startTalk").addEventListener("click", () => beginTalk(state.imported));
 
@@ -268,7 +460,7 @@ $("resume").addEventListener("change", async (e) => {
   e.target.value = "";
   if (!file) return;
   try {
-    beginTalk(fromResumeFile(JSON.parse(await file.text())));
+    beginTalk(checkResumedFormat(fromResumeFile(JSON.parse(await file.text()))));
   } catch (err) {
     showError($("fileError"), `読み込めませんでした。${err.message}`);
   }
@@ -288,6 +480,7 @@ fetch("/api/config").then((r) => r.json()).then(({ publicDemo }) => {
   // 公開デモでは実在のデータが入らないよう、架空のサンプルだけにする
   $("file").closest("label").hidden = true;
   $("resume").closest("label").hidden = true;
+  $("formatFile").closest("label").hidden = true;
   $("manualStart").hidden = true;
 }).catch(() => {});
 goTo(1);

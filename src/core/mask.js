@@ -1,6 +1,9 @@
 // Claude に渡す前に、本物の値を記号に置き換える。対応表は手元から出さない
 import { normalizeDate, normalizePhone, normalizePostal, normalizeText, toHalfWidth } from "./normalize.js";
-import { formKind } from "./redact.js";
+import { formKind, personalKind } from "./redact.js";
+
+// 見出しに入ると指示文の行に見える文字。読むときに断る
+export const CONTROL = /[\p{Cc}\u2028\u2029]/u;
 
 const WITHHELD_HEADER = /備考|メモ|特記|自由記述|コメント/;
 
@@ -47,12 +50,12 @@ export function maskTable({ headers, rows }, { sampleRows = 5 } = {}) {
 
   const cellSet = new Set(rows.flat().map((v) => normalizeText(v)).filter(Boolean));
   const columns = headers.map((header, col) => {
-    if (WITHHELD_HEADER.test(header)) return { header, withheld: true, suspectHeader: looksLikeValue(header), samples: [] };
+    if (WITHHELD_HEADER.test(header)) return { header, withheld: true, suspectHeader: looksLikeValue(header) || Boolean(personalKind(header)) || CONTROL.test(header), samples: [] };
     return {
       header,
       withheld: false,
       // 「同居」「歩行」のように列の値と同じ見出しはあるので、見出しの言葉なら通す
-      suspectHeader: (cellSet.has(normalizeText(header)) && !HEADER_WORD.test(header)) || looksLikeValue(header),
+      suspectHeader: (cellSet.has(normalizeText(header)) && !HEADER_WORD.test(header)) || looksLikeValue(header) || Boolean(personalKind(header)) || CONTROL.test(header),
       samples: rows.slice(0, sampleRows).map((row) => toSymbol(row[col] ?? "")),
     };
   });

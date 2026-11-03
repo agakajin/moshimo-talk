@@ -1,5 +1,6 @@
-// 帰る前に出すもの。すべて決まった通りにプログラムで作る。AI に値を作らせない
+// 訪問終了で出すもの。すべて決まった通りにプログラムで作る。AI に値を作らせない
 import { parseMinutes } from "./normalize.js";
+import { DEFAULT_TARGETS } from "./format.js";
 const filled = (f) => f?.status === "filled";
 const val = (f) => (filled(f) ? f.value : "");
 
@@ -13,6 +14,10 @@ const SECTION_LABEL = {
   contactMeans: "知らせの受け方",
   carry: "持ち出し",
   "home.bedroom": "寝る部屋",
+  "home.aloneHours": "ひとりになる時間帯",
+  "care.stairs": "階段",
+  "care.hearing": "聞こえ方",
+  "considerations.items": "配慮すること",
 };
 const getAt = (obj, path) => path.split(".").reduce((o, k) => o?.[k], obj);
 
@@ -104,9 +109,10 @@ export function formatPhone(digits) {
   return digits;
 }
 
-export const hasCityConsent = (plan) => Object.values(plan.consent).some((v) => v === "yes");
+// 今の様式に無い分類の同意では出さない。その同意は画面で取り消せないため
+export const hasCityConsent = (plan, config) => Object.keys(config?.consentGroups ?? plan.consent).some((g) => plan.consent[g] === "yes");
 
-// ハッカ村の形に当てはめる。同意していない項目は空にする
+// 出口の様式に当てはめる。同意していない項目は空にする
 export function buildVillageRow({ plan, identity, people = [], config, createdOn, serial = "仮-0001" }) {
   const helper = (i) => {
     const h = plan.helpers.filter((x) => x.asked)[i];
@@ -115,44 +121,48 @@ export function buildVillageRow({ plan, identity, people = [], config, createdOn
   };
   const [h1, h2] = [helper(0), helper(1)];
   const open = (f) => (val(f) && plan.consent.helper !== "yes" ? withoutHelpers(val(f), plan, people) : val(f));
-  const considerations = [open(plan.care.mobility), open(plan.considerations.items)].filter(Boolean).join("；");
-  const values = {
-    管理番号: serial,
-    氏名: identity["self.name"] ?? "",
-    ふりがな: identity["self.kana"] ?? "",
-    生年月日: identity["self.birth"] ?? "",
-    性別: identity["self.gender"] ?? "",
-    住所: identity["self.address"] ?? "",
-    自治会名: open(plan.home.community),
-    普段いる部屋: open(plan.home.usualRoom),
-    寝室の場所: open(plan.home.bedroom),
-    ひとりになる時間帯: open(plan.home.aloneHours),
-    電話番号: formatPhone(identity["self.phone"]),
-    携帯電話: "",
-    避難場所: open(plan.evacuation.place),
-    避難支援者1氏名: h1.name,
-    避難支援者1続柄: h1.relation,
-    避難支援者1電話: h1.phone,
-    避難支援者2氏名: h2.name,
-    避難支援者2続柄: h2.relation,
-    避難支援者2電話: h2.phone,
-    緊急連絡先1氏名: identity["emergency.name"] ?? "",
-    緊急連絡先1電話: formatPhone(identity["emergency.phone"]),
-    避難時の配慮事項: considerations,
-    要介護度: val(plan.care.level),
-    自宅の災害リスク: open(plan.hazards.items),
-    避難方法: evacuationSentence(plan, plan.consent.helper === "yes" ? h1.relation : null, people),
-    特記事項: "",
-    作成日: createdOn,
+  // 話した階段や聞こえ方も市に届くよう、配慮の列にまとめる
+  const considerations = [plan.care.mobility, plan.care.stairs, plan.care.hearing, plan.considerations.items].map(open).filter(Boolean).join("；");
+  const hazards = [plan.hazards.items, plan.home.hazardNote].map(open).filter(Boolean).join("；");
+  const minutes = totalMinutes(plan);
+  const direct = {
+    "meta.serial": serial,
+    "meta.createdOn": createdOn,
+    "self.name": identity["self.name"] ?? "",
+    "self.kana": identity["self.kana"] ?? "",
+    "self.birth": identity["self.birth"] ?? "",
+    "self.gender": identity["self.gender"] ?? "",
+    "self.postal": identity["self.postal"] ?? "",
+    "self.address": identity["self.address"] ?? "",
+    "self.phone": formatPhone(identity["self.phone"]),
+    "emergency.name": identity["emergency.name"] ?? "",
+    "emergency.phone": formatPhone(identity["emergency.phone"]),
+    "helper1.name": h1.name,
+    "helper1.relation": h1.relation,
+    "helper1.phone": h1.phone,
+    "helper2.name": h2.name,
+    "helper2.relation": h2.relation,
+    "helper2.phone": h2.phone,
+    "considerations.all": considerations,
+    "hazards.all": hazards,
+    "evacuation.summary": evacuationSentence(plan, plan.consent.helper === "yes" ? h1.relation : null, people),
+    "evacuation.minutes": minutes === null ? "" : String(minutes),
+    "care.level": val(plan.care.level),
+    none: "",
+  };
+  const valueOf = (column) => {
+    const target = config.targets?.[column] ?? DEFAULT_TARGETS[column];
+    if (target === undefined) return "";
+    return target in direct ? direct[target] : open(getAt(plan, target));
   };
   const allowed = new Set(config.alwaysColumns);
-  const optional = new Set(["携帯電話", "避難支援者2氏名", "避難支援者2続柄", "避難支援者2電話", "特記事項"]);
+  const optional = new Set(config.columns.filter((c) => ["none", "helper2.name", "helper2.relation", "helper2.phone"].includes(config.targets?.[c] ?? DEFAULT_TARGETS[c])));
   for (const [group, def] of Object.entries(config.consentGroups)) {
     if (plan.consent[group] === "yes") def.columns.forEach((c) => allowed.add(c));
   }
   return config.columns.map((column) => {
     if (config.neverColumns.includes(column) || !allowed.has(column)) return "";
-    const v = values[column] ?? "";
+    const v = valueOf(column);
     return v === "" && !optional.has(column) ? config.blankValue : v;
   });
 }

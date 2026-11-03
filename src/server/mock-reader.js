@@ -21,9 +21,38 @@ const RULES = [
   [/備考|メモ|特記/, "notes"],
 ];
 
-export function mockReadColumns({ columns }) {
+// 出口の様式。順番に意味がある（緊急連絡先を先に見る）
+const OUTPUT_RULES = [
+  [/管理番号|整理番号/, "meta.serial"],
+  [/作成日|記入日/, "meta.createdOn"],
+  [/カナ|かな|ﾌﾘｶﾞﾅ/, "self.kana"],
+  [/緊急.*(電話|TEL)/i, "emergency.phone"],
+  [/緊急.*(氏名|名前)/, "emergency.name"],
+  [/(支援者|同行者).*(電話|TEL)/i, "helper1.phone"],
+  [/支援者.*続柄/, "helper1.relation"],
+  [/支援者|同行者/, "helper1.name"],
+  [/氏名|名前/, "self.name"],
+  [/生年月日/, "self.birth"],
+  [/性別/, "self.gender"],
+  [/住所/, "self.address"],
+  [/自治会|町内会/, "home.community"],
+  [/電話|TEL/i, "self.phone"],
+  [/避難先|避難場所/, "evacuation.place"],
+  [/避難方法/, "evacuation.summary"],
+  [/手段/, "evacuation.means"],
+  [/所要/, "evacuation.minutes"],
+  [/配慮/, "considerations.all"],
+  [/災害|リスク/, "hazards.all"],
+  [/介護度/, "care.level"],
+  [/寝室/, "home.bedroom"],
+  [/部屋/, "home.usualRoom"],
+  [/ひとり|一人/, "home.aloneHours"],
+  [/住居|居住|階/, "new"],
+];
+
+export function mockReadColumns({ columns, kind }) {
   return columns.map(({ header }) => {
-    const hit = RULES.find(([re]) => re.test(header));
+    const hit = (kind === "output" ? OUTPUT_RULES : RULES).find(([re]) => re.test(header));
     return { header, target: hit ? hit[1] : "unknown", confidence: hit ? "medium" : "low" };
   });
 }

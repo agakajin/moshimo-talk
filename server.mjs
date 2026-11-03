@@ -96,7 +96,11 @@ const ENGINE = MODE === "claude" ? await connectClaude() : MOCK;
 
 // 公開デモで読めるのは架空のサンプルの列だけ。画面で隠すだけでなく、ここでも止める
 const SAMPLE_HEADERS = new Set(Object.keys(JSON.parse(await readFile(join(ROOT, "samples", "keahakka.mapping.json"), "utf-8"))));
-const samplesOnly = (p) => (PUBLIC_DEMO && !p.columns.every((c) => SAMPLE_HEADERS.has(c.header)) ? ["公開デモでは架空のサンプルだけ使えます"] : []);
+const MINT_HEADERS = new Set((await readFile(join(ROOT, "samples", "mint-city.format.csv"), "utf-8")).replace(/^\uFEFF/, "").trim().split(","));
+const samplesOnly = (p) => {
+  const allowed = p.kind === "output" ? MINT_HEADERS : SAMPLE_HEADERS;
+  return PUBLIC_DEMO && !p.columns.every((c) => allowed.has(c.header)) ? ["公開デモでは架空のサンプルだけ使えます"] : [];
+};
 
 const API = {
   "/api/read-columns": { validate: (p) => { const e = validateColumnsPayload(p); return e.length ? e : samplesOnly(p); }, run: (p) => ENGINE.readColumns(p) },

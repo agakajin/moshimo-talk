@@ -1,7 +1,7 @@
 // 本物の Claude への窓口。答えはそのまま使わず、決まりに合うものだけを通す
 import { minutesIn, parseMinutes } from "../core/normalize.js";
 import { personalKind } from "../core/redact.js";
-import { COMMON_YARDSTICKS, READER, READER_TARGETS, SCRIBE, SCRIBE_PATHS, checkPrompt } from "./prompts.js";
+import { COMMON_YARDSTICKS, OUTPUT_READER, OUTPUT_READER_TARGETS, READER, READER_TARGETS, SCRIBE_PATHS, checkPrompt, scribePrompt } from "./prompts.js";
 
 export const DEFAULT_MODEL = "claude-opus-5-5";
 const FALLBACK_BETA = "server-side-fallback-2026-07-01";
@@ -12,6 +12,8 @@ const MEDICAL = /診断|処方|服薬|服用|投薬|減薬|薬の量|薬[をは]
 // 書き取りで止めるのは、やめる・止めるといった指図だけ
 const MEDICAL_ORDER = /(?:薬|酸素|インスリン|透析).{0,8}(?:やめ|止め|減らす|増やす|控え|外す|外して)/;
 const PROMISE = /必ず|かならず|絶対|ぜったい|毎回|毎晩|約束|責任を持|責任をも|義務|迎えに行|迎えに来ます|してあげ|連絡します|電話します/;
+// 計画は下書きなので、決まった、大丈夫と言い切る文と、相手に連絡する文、受診の指図は残さない。「まだ決まっていません」は通す
+const DECIDED = /決まっている(?:の|から)|決まっています|決まりました|決まった|完成|安全です|間に合います|連絡を入れ|連絡して|お伝えし|電話をかけ|病院へ|主治医|安静|いりません/;
 
 export class ClaudeError extends Error {
   constructor(message, status = 502) {
@@ -40,7 +42,7 @@ export function summarizePlan(plan) {
     }
     return Object.keys(out).length ? out : undefined;
   };
-  const { consent, nextSteps, requests, requestsDone, ...rest } = plan;
+  const { consent, consentInput, nextSteps, requests, requestsDone, ...rest } = plan;
   return walk(rest) ?? {};
 }
 
@@ -62,30 +64,36 @@ const NOT_ASKED = /たい|たかった|たら|だら|ほうが|方が|ほしい|
 const DECLINED = /断られ|断わられ|引き受けられない/;
 // 呼び名は続き柄か位置で書く。分からないものは名前かもしれないので、一般の呼び方にする
 const RELATION = /隣|近所|近く|向かい|同じ|娘|息子|嫁|婿|孫|夫|妻|兄|姉|弟|妹|親|母|父|祖|家族|友|知り合い|民生|委員|職員|ヘルパー/;
-const sentenceOf = (quote, memo) => memo.split(/[。！？!?\n]/).find((s) => squeeze(s).includes(squeeze(quote))) ?? "";
+// 音声認識は句点を打たず空白で続けるので、空白の切れ目も文の切れ目として見る。引用がまたぐときは文全体を見る
+function sentenceOf(quote, memo) {
+  const sentence = memo.split(/[。！？!?\n]/).find((s) => squeeze(s).includes(squeeze(quote))) ?? "";
+  return sentence.split(/[\s　]+/).find((part) => squeeze(part).includes(squeeze(quote))) ?? sentence;
+}
 // 呼び名の中心の言葉が、根拠の文に出ていること。「娘に頼んだ」を根拠に息子さんを入れない
 const namesPerson = (alias, quote) => squeeze(quote).includes(alias.match(RELATION)?.[0] ?? squeeze(alias));
 // 置き換えの記号のまま計画に入れると、本人の1枚と市向けの CSV に記号が出る
 const PLACEHOLDER = /\[(?:お名前|住所|日付|電話番号|郵便番号)\]/;
 // 答えをまだ聞いていない問いかけは、根拠にしない。文の終わりで見るので、引用から「か」を抜いても通らない
-const QUESTION = /(?:ます|です|でしょう|ません|ない|ある|いる|した)か(?:ね|な)?\s*$/;
+// 「公民館ですかね」は考えながらの復唱でもあるので、ここでは捨てず Claude の判断と人の確認に任せる
+const QUESTION = /(?:ます|です|でしょう|ません|ない|ある|いる|した)か\s*$/;
 const isAsking = (quote, memo) => QUESTION.test(sentenceOf(quote, memo)) || /[?？]/.test(memo.slice(memo.indexOf(quote) + quote.length, memo.indexOf(quote) + quote.length + 1));
 
-export function acceptColumns(results, columns) {
+export function acceptColumns(results, columns, targets = READER_TARGETS) {
   const byHeader = new Map(results.map((r) => [r.header, r]));
   return columns.map(({ header }) => {
     const hit = byHeader.get(header);
-    return hit && READER_TARGETS.includes(hit.target) && hit.target !== "unknown"
+    return hit && targets.includes(hit.target) && hit.target !== "unknown"
       ? { header, target: hit.target, confidence: hit.confidence }
       : { header, target: "unknown", confidence: "low" };
   });
 }
 
 // メモに根拠の無い書き込みは捨てる。聞いていないことを計画に入れない
-export function acceptScribe({ updates, helpers }, memo) {
+export function acceptScribe({ updates, helpers }, memo, fields = []) {
   const accepted = [];
+  const allowed = new Set([...SCRIBE_PATHS, ...fields.map((f) => f.key)]);
   for (const { path, value, quote } of updates) {
-    if (!SCRIBE_PATHS.includes(path) || !isQuoted(quote, memo) || isAsking(quote, memo) || personalKind(value) || PLACEHOLDER.test(value) || MEDICAL_ORDER.test(value)) continue;
+    if (!allowed.has(path) || !isQuoted(quote, memo) || isAsking(quote, memo) || personalKind(value) || PLACEHOLDER.test(value) || MEDICAL_ORDER.test(value)) continue;
     if (path.endsWith(".noOthers")) {
       if (value === "true" && /ほか|他/.test(quote) && /ない|なし|ません/.test(quote)) accepted.push({ path, value: true });
       continue;
@@ -93,7 +101,8 @@ export function acceptScribe({ updates, helpers }, memo) {
     if (path.endsWith("Minutes")) {
       // 値の分数が、根拠の文に出てくる時間と合っているか
       const minutes = parseMinutes(value);
-      if (minutes !== null && minutesIn(quote).includes(minutes)) accepted.push({ path, value: String(minutes) });
+      // 「1時間15分」の一部だけを引用しても通らないよう、文全体で見る
+      if (minutes !== null && minutesIn(sentenceOf(quote, memo)).includes(minutes)) accepted.push({ path, value: String(minutes) });
       continue;
     }
     const text = value.trim();
@@ -123,7 +132,7 @@ export function acceptFindings(findings, yardsticks) {
     const index = labels.indexOf(f.yardstick);
     if (index < 0 || accepted.length >= MAX_FINDINGS) continue;
     if ([f.text, f.opener, f.request].some((t) => t && (MEDICAL.test(t) || personalKind(t)))) continue;
-    if ([f.text, f.opener].some((t) => t && PROMISE.test(t))) continue;
+    if ([f.text, f.opener].some((t) => t && (PROMISE.test(t) || DECIDED.test(t)))) continue;
     const interrupt = f.interrupt === true && Boolean(f.opener);
     const kind = interrupt ? "ask" : f.request ? "request" : "note";
     // 番号は決まった作り方にする。同じ物差しの割り込みを何度も出さないため
@@ -186,18 +195,19 @@ export function createClaude({ client, village, model = DEFAULT_MODEL, onUsage =
   }
 
   return {
-    async readColumns(payload) {
-      const { results } = await ask("reader", READER, payload);
-      return { results: acceptColumns(results, payload.columns) };
+    async readColumns({ kind, columns }) {
+      const output = kind === "output";
+      const { results } = await ask("reader", output ? OUTPUT_READER : READER, { columns });
+      return { results: acceptColumns(results, columns, output ? OUTPUT_READER_TARGETS : READER_TARGETS) };
     },
-    async scribe({ memo, plan }) {
-      const answer = await ask("scribe", SCRIBE, { memo, plan: summarizePlan(plan) });
-      const updates = acceptScribe(answer, memo);
+    async scribe({ memo, plan, fields = [] }) {
+      const answer = await ask("scribe", scribePrompt(fields), { memo, plan: summarizePlan(plan), fields });
+      const updates = acceptScribe(answer, memo, fields);
       // 捨てたものがあれば画面で知らせる
       return { updates, dropped: answer.updates.length + answer.helpers.length - updates.length };
     },
-    async check({ plan, gaps }) {
-      const { findings } = await ask("check", checker, { plan: summarizePlan(plan), gaps });
+    async check({ plan, gaps, blanks = [], fields = [] }) {
+      const { findings } = await ask("check", checker, { plan: summarizePlan(plan), gaps, blanks, fields });
       const time = timeFinding(plan, village.evacuationTargetMinutes);
       return { findings: [...acceptFindings(findings, yardsticks), ...(time ? [time] : [])] };
     },

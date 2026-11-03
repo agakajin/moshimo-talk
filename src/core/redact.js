@@ -28,6 +28,7 @@ const NOT_A_NAME = new Set([
   "本人", "緊急連絡先", "人", "方", "子", "皆", "赤", "猫", "犬", "ワン", "同", "模", "雨模", "多", "各", "王", "神", "仏",
   "娘", "息子", "奥", "嫁", "婿", "孫", "母", "父", "祖母", "祖父", "兄", "姉", "弟", "妹", "夫", "妻", "旦那", "親", "親戚", "甥", "姪", "叔母", "伯母", "叔父", "伯父",
   "長男", "次男", "三男", "長女", "次女", "三女", "義母", "義父", "家族", "兄弟", "姉妹", "親子",
+  "利用者", "支援者", "対象者", "申請者", "入居者", "保護者", "担当者", "契約者",
   "隣", "近所", "大家", "民生", "民生委員", "委員", "担当", "職員", "運転手", "先生", "医者", "駐在", "社協", "施設", "郵便屋", "同様", "模様", "逆", "坊", "隣おじ", "隣おば", "近所おじ", "近所おば",
 ]);
 const NOT_A_NAME_END = [
@@ -42,7 +43,9 @@ const NOT_A_NAME_END = [
 const BEFORE_CHANTO = new Set(["薬", "鍵", "杖", "窓", "戸", "火", "水", "飯", "ご飯", "電気", "毎日", "毎朝", "毎晩", "今日", "全部", "準備", "連絡"]);
 // 「行くんですね」は復唱でよく出る。1字の動詞のあとの「くんで」「くんだ」は名前と見ない
 const VERB_BEFORE_KUN = new Set([..."行歩動聞書置着届開続働泣引抜付焼効吹敷突解磨招向空履乾叩抱巻"]);
-const isOrdinary = (word, after) => (after.startsWith("ちゃんと") && BEFORE_CHANTO.has(word)) || (/^くん[でだ]/.test(after) && (word.endsWith("水") || VERB_BEFORE_KUN.has(word)));
+// 様式の見出しでよく見る「カナ氏名」など。「佐藤氏名古屋へ」は名前のまま
+const BEFORE_SHIMEI = new Set(["カナ", "フリガナ", "被保険者", "同行者", "代表者", "避難者", "世帯主", "申込者", "入所者", "患者", "主治医", "医師", "連絡先"]);
+const isOrdinary = (word, after) => (after.startsWith("氏名") && [word, word.replace(/様$/, "")].some((w) => BEFORE_SHIMEI.has(w) || NOT_A_NAME.has(w))) || (after.startsWith("ちゃんと") && BEFORE_CHANTO.has(word)) || (/^くん[でだ]/.test(after) && (word.endsWith("水") || VERB_BEFORE_KUN.has(word)));
 const NAME = /(?:[\p{Script=Han}々ァ-ヶー]{1,20}(?:(?![のにはをがとへもで])[ぁ-ゖ]){0,3})(?=さん(?!ざん)|様(?!子|便|がな|式|々)|さま|氏|ちゃん|くん)/gu;
 const isName = (word) => !NOT_A_NAME.has(word) && !NOT_A_NAME_END.some((end) => word.endsWith(end));
 
