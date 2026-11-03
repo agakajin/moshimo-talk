@@ -248,6 +248,7 @@ body:not(.home) #hero, body.home .top, body.home .steps { display: none; }
 .slot.over { border-color: var(--accent); background: var(--accent-soft); }
 .slot.filled { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
 .slot-empty, .slot-filled { display: flex; flex: 1; flex-direction: column; }
+.panel .slot .slot-whose { margin: -4px 0 8px; font-weight: 600; }
 .slot-drop { flex: 1; display: flex; align-items: center; justify-content: center; margin: 0 0 12px; color: var(--muted); font-size: 16px; text-align: center; }
 .slot-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .slot-name { margin: 8px 0 0; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
@@ -275,8 +276,6 @@ body[data-role] .hero-flow, body[data-role] .hero-note, body[data-role] .role-no
 body[data-role] .role-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 24px; }
 body[data-role] .role-ask h2 { margin: 0; font-size: 16px; }
 body:not(.home) #roleAsk { display: none; }
-body[data-role="minsei"] #slotCare, body[data-role="minsei"] .slot-link, body[data-role="minsei"] .care-only { display: none; }
-body[data-role="minsei"] .slots { grid-template-columns: minmax(0, 1fr); }
 
 /* タブ。列をつなぐ画面と訪問終了で同じ形にする */
 .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; border-bottom: 2px solid var(--line); }

@@ -190,11 +190,12 @@ export function startWrap(state, findings, config) {
   // 渡す相手ごとにタブで分ける。「そのほか」は全部を並べる。同意は各タブの中にそのまま出す
   function renderWrapTabs() {
     const role = document.body.dataset.role;
+    const careTab = state.input ? [["input", "ケアプランへ", "inputPanel"]] : [];
+    const cityTab = [["city", "市へ", "cityPanel"]];
+    // 自分の様式を先に出す
     const tabs = [
       ["sheet", "ご本人へ", "sheetPanel"],
-      // 民生委員はケアプランを持たないので出さない
-      ...(state.input && role !== "minsei" ? [["input", "ケアプランへ", "inputPanel"]] : []),
-      ["city", "市へ", "cityPanel"],
+      ...(role === "minsei" ? [...cityTab, ...careTab] : [...careTab, ...cityTab]),
     ];
     const all = role === "other";
     state.wrapTab = tabs.some(([key]) => key === state.wrapTab) ? state.wrapTab : "sheet";

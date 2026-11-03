@@ -68,6 +68,7 @@
       <div class="slots">
         <div id="slotCare" class="slot" data-slot="care">
           <h3>ケアプラン</h3>
+          <p class="slot-whose hint" hidden></p>
           <div class="slot-empty">
             <p class="slot-drop">CSV をここにドラッグ</p>
             <div class="slot-actions">
@@ -89,6 +90,7 @@
         </div>
         <div id="slotPlan" class="slot" data-slot="plan">
           <h3>個別避難計画書</h3>
+          <p class="slot-whose hint" hidden></p>
           <div class="slot-empty">
             <p class="slot-drop">CSV をここにドラッグ</p>
             <div class="slot-actions">
@@ -115,9 +117,9 @@
         <label class="button">続きから
           <input id="resume" type="file" accept=".json,application/json" hidden>
         </label>
-        <span class="or care-only">台本つきで試す</span>
-        <button id="quickStart" class="button care-only" data-quick="okano">岡野さん</button>
-        <button id="quickStartB" class="button care-only" data-quick="yoshikawa">𠮷川さん</button>
+        <span class="or">台本つきで試す</span>
+        <button id="quickStart" class="button" data-quick="okano">岡野さん</button>
+        <button id="quickStartB" class="button" data-quick="yoshikawa">𠮷川さん</button>
       </div>
     </section>
 

@@ -158,8 +158,7 @@ async function takeFiles(key, files) {
     return;
   }
   const other = key === "care" ? "plan" : "care";
-  // 民生委員の画面にケアプランの枠は無いので、2つ目を見えない枠へ入れない
-  const list = [...files].slice(0, document.body.dataset.role === "minsei" ? 1 : 2);
+  const list = [...files].slice(0, 2);
   const wrong = list.find((f) => !/\.csv$/i.test(f.name));
   if (wrong) {
     showError($("fileError"), `${wrong.name} は CSV ではありません。CSV を入れてください。`);
@@ -937,13 +936,16 @@ $("swapSlots").addEventListener("click", () => {
 function chooseRole(role) {
   document.body.dataset.role = role;
   document.querySelectorAll("[data-role-choice]").forEach((b) => b.classList.toggle("primary", b.dataset.roleChoice === role));
-  const minsei = role === "minsei";
-  // 民生委員の画面では見えないケアプランを残さない
-  if (minsei) state.slots.care = null;
-  $("step1Title").textContent = minsei ? "個別避難計画書があれば入れてください" : "つなぎたいデータを2つ入れる";
-  $("step1Hint").textContent = minsei
-    ? "ファイルはこの画面の中で読みます。この時点では、どこにも送りません。無ければ「CSV なしで始める」で、分かることだけ入れて始められます。"
-    : "ファイルはこの画面の中で読みます。この時点では、どこにも送りません。片方だけでも始められます。";
+  // どちらも相手のデータを受け取っている前提で、自分の分と受け取った分を示す
+  const whose = {
+    care: ["あなたのデータ", "民生委員から受け取ったデータ"],
+    minsei: ["ケアマネジャーから受け取ったデータ", "あなたのデータ"],
+  }[role] ?? ["", ""];
+  ["slotCare", "slotPlan"].forEach((id, i) => {
+    const note = $(id).querySelector(".slot-whose");
+    note.textContent = whose[i];
+    note.hidden = !whose[i];
+  });
   showError($("fileError"), "");
   renderSlots();
 }
