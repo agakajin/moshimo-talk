@@ -8,7 +8,7 @@ import { mockReadColumns } from "./src/server/mock-reader.js";
 import { mockCheck, mockScribe } from "./src/server/mock-talk.js";
 import { ClaudeError, createClaude, DEFAULT_MODEL } from "./src/server/claude.js";
 import { isAuthorized, SECURITY_HEADERS, startupProblem } from "./src/server/auth.js";
-import { createLimiter } from "./src/server/limits.js";
+import { clientKey, createLimiter } from "./src/server/limits.js";
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
 const PORT = Number(process.env.PORT ?? 5177);
@@ -152,8 +152,7 @@ const server = createServer(async (req, res) => {
   if (req.method === "POST" && API[pathname]) {
     // よそのページから回数と費用を使わせない。送れる形を JSON に限ると、ブラウザが先に確かめる
     if (!/^application\/json\b/i.test(req.headers["content-type"] ?? "")) return sendJson(res, 415, { errors: ["使えない操作です"] });
-    // 手前の値は名乗り放題なので、置き場のプロキシが最後に足した値を使う
-    const client = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress).split(",").at(-1).trim();
+    const client = clientKey(req.headers, req.socket.remoteAddress, process.env.RENDER === "true");
     const limit = limiter.check(client);
     if (!limit.ok) return sendJson(res, 429, { errors: [limit.reason] });
     return handleApi(req, res, API[pathname]);

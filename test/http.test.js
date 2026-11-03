@@ -176,3 +176,15 @@ test("JSON でない送信は、よそのページからのものとして断る
   const res = await fetch(`${base}/api/check`, { method: "POST", headers: { "Content-Type": "text/plain" }, body: "{}" });
   assert.equal(res.status, 415);
 });
+
+test("接続元は Render では Cloudflare の値で決め、名乗った値に左右されない", async () => {
+  const { clientKey } = await import("../src/server/limits.js");
+  const headers = { "cf-connecting-ip": "203.0.113.5", "x-forwarded-for": "198.51.100.9, 203.0.113.5, 192.0.2.1" };
+  assert.equal(clientKey(headers, "10.0.0.1", true), "203.0.113.5");
+  // Render の外では、Cloudflare の値を名乗られても信じない
+  assert.equal(clientKey(headers, "10.0.0.1", false), "192.0.2.1");
+  assert.equal(clientKey({ "cf-connecting-ip": "203.0.113.5" }, "10.0.0.1", false), "10.0.0.1");
+  // 値が無ければ今までどおり
+  assert.equal(clientKey({ "x-forwarded-for": "198.51.100.9, 192.0.2.1" }, "10.0.0.1", true), "192.0.2.1");
+  assert.equal(clientKey({}, "10.0.0.1", true), "10.0.0.1");
+});

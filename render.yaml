@@ -2,7 +2,7 @@ services:
   - type: web
     name: hinan-hanashi
     runtime: node
-    plan: free
+    plan: starter
     region: singapore
     branch: main
     autoDeploy: true
@@ -16,6 +16,12 @@ services:
         value: "1"
       - key: NODE_VERSION
         value: "22"
+      - key: LIMIT_PER_MINUTE
+        value: "60"
+      - key: LIMIT_PER_DAY
+        value: "1000"
+      - key: LIMIT_PER_CLIENT_DAY
+        value: "400"
       - key: APP_PASSWORD
         sync: false
       - key: ANTHROPIC_API_KEY

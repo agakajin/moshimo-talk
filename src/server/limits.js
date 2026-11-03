@@ -1,3 +1,10 @@
+// 接続元を決める。Render の手前の Cloudflare が付ける値は名乗れないので、Render の上ではそれを使う
+// x-forwarded-for の最後は Render では Cloudflare の住所になり、手前の値は名乗り放題
+export function clientKey(headers, remoteAddress, onRender = false) {
+  const cf = onRender ? String(headers["cf-connecting-ip"] ?? "").trim() : "";
+  return cf || String(headers["x-forwarded-for"] ?? remoteAddress).split(",").at(-1).trim();
+}
+
 // 費用が暴走しないよう、接続元ごとの回数と1日の総数を数える。サーバーを再起動すると数え直す
 export function createLimiter({ perMinute = 40, perDay = 3000, perClientDay = Infinity, now = () => Date.now() } = {}) {
   const hits = new Map();
