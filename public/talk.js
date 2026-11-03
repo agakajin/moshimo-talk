@@ -1,6 +1,7 @@
 // 訪問の画面。声メモは送る前に伏せ、送る中身をそのまま見せる
 import { applyUpdates, editField, fieldsBefore, moveField, placedFields, planForClaude, serviceGaps, setIdentity } from "/core/plan.js";
 import { blankColumns, planFieldList, requiredBlanks } from "/core/format.js";
+import { pendingRechecks } from "/core/merge.js";
 import { parseMinutes } from "/core/normalize.js";
 import { findLeaks, redact, redactDeep } from "/core/redact.js";
 import { nextTopic, REQUEST_NOTE } from "/core/talk.js";
@@ -129,7 +130,17 @@ export function startTalk(state, { script = null } = {}) {
     return el("label", { className: "field-label" }, label, input);
   }));
 
-  // 欄に分けられなかった前の計画書の文。Claude に送らず、話の参考に手元で見せる
+  // 確かめる手元の情報は欄が空なので、2つの値を声メモから伏せる控えに入れておく
+  for (const { key, current, incoming, local } of state.rechecks ?? []) {
+    const guard = LOCAL_FIELDS.find(([k]) => k === key)?.[2];
+    if (!local || !guard) continue;
+    for (const value of [current, incoming]) {
+      known.unshift({ value, ...guard });
+      secrets.push(guard.kind === "address" ? { value, kind: "address" } : value);
+    }
+  }
+
+  // 欄に分けられなかった入れた計画書の文。Claude に送らず、話の参考に手元で見せる
   $("localLeft").replaceChildren(...(state.leftovers ?? []).map(({ label, value }) => el("li", { textContent: `${label}：${value}` })));
   $("localLeftBox").hidden = !state.leftovers?.length;
 
@@ -154,6 +165,12 @@ export function startTalk(state, { script = null } = {}) {
     if (memoCount === 0) {
       const first = nextTopic(plan, { gaps, skipped });
       if (first?.id === "hazards") return first;
+    }
+    // 2つのデータで違っていた欄を先に確かめる。この文は画面にだけ出し、飛ばしたときに残す文には値を入れない
+    const recheck = pendingRechecks(state).find((r) => !skipped.includes(`recheck:${r.key}`));
+    if (recheck) {
+      const { key, label, current, incoming, local } = recheck;
+      return { id: `recheck:${key}`, text: `${label}を確かめます。ケアプランは「${current}」、計画書は「${incoming}」です。今はどちらですか？`, stepText: `${label}を確かめる`, fills: local ? [] : [key] };
     }
     const required = requiredBlanks(state);
     const later = [];
@@ -453,6 +470,9 @@ export function startTalk(state, { script = null } = {}) {
       return button;
     };
     const confirms = [...changeBoxes].map(([path, box]) => chip(`確認：${LABEL.get(path) ?? path}`, "confirm", { row: planRows.get(path).row, focus: box.querySelector("input") }));
+    for (const { key, label, local } of pendingRechecks(state)) {
+      confirms.push(chip(`確かめる：${label}`, "confirm", local || !planRows.has(key) ? { row: $("localInfo"), focus: null } : { row: planRows.get(key).row, focus: planRows.get(key).input }));
+    }
     const blanks = [...fields.keys()].map((path) => chip(LABEL.get(path) ?? path, "", { row: planRows.get(path).row, focus: planRows.get(path).input }));
     if (helper) blanks.push(chip(`${helper}（頼めた人）`, "", { row: $("planHelpers"), focus: null }));
     const looseMemos = [...$("memos").querySelectorAll(".loose")];
@@ -477,17 +497,19 @@ export function startTalk(state, { script = null } = {}) {
   function renderPlan() {
     if (planRows.size === 0) buildPlanRows();
     const required = requiredBlanks(state);
+    const rechecks = new Map(pendingRechecks(state).map((r) => [r.key, r]));
     for (const [path, { row, input, note, move, here, badge }] of planRows) {
       const f = getAt(plan, path);
       const isLatest = latest.has(path);
       const isRequired = required.fields.has(path);
-      const confirming = changeBoxes.has(path);
+      const recheck = rechecks.get(path);
+      const confirming = changeBoxes.has(path) || Boolean(recheck);
       const choosing = moving || placing;
       row.className = `plan-row ${f.status}${isRequired ? " required" : ""}${confirming ? " confirming" : ""}${isLatest ? " fresh" : ""}${moving === path ? " moving" : ""}${choosing && moving !== path ? " target" : ""}`;
       badge.hidden = !isRequired && !confirming;
       badge.textContent = confirming ? "確認" : "必須";
       badge.className = confirming ? "badge confirm" : "badge";
-      input.placeholder = isRequired ? "未記入" : "未決定";
+      input.placeholder = recheck ? `ケアプラン：${recheck.current}／計画書：${recheck.incoming}` : isRequired ? "未記入" : "未決定";
       // 打っている欄の文字は消さない。移している間は打っていないので、行き先にも値を見せる
       if (document.activeElement !== input || input.readOnly) input.value = f.value ?? "";
       input.readOnly = Boolean(choosing);
@@ -869,7 +891,7 @@ export function startTalk(state, { script = null } = {}) {
     if (topic) {
       skipped.push(topic.id);
       topic.fills.forEach((p) => skippedFields.add(p));
-      plan.nextSteps.push({ topic: topic.id, text: topic.text, fills: topic.fills });
+      plan.nextSteps.push({ topic: topic.id, text: topic.stepText ?? topic.text, fills: topic.fills });
     }
     renderOpener();
   });

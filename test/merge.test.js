@@ -4,8 +4,8 @@ import { readFile } from "node:fs/promises";
 import { decodeCsv, parseCsv } from "../src/core/csv.js";
 import { attachOutput, buildInputRow, DEFAULT_TARGETS, isOwnNumberColumn } from "../src/core/format.js";
 import { buildVillageRow } from "../src/core/output.js";
-import { chooseConflict, describeFlows, findPersonRow, mergeOutputRow } from "../src/core/merge.js";
-import { fromResumeFile, importRow, toResumeFile } from "../src/core/plan.js";
+import { chooseConflict, describeFlows, findPersonRow, mergeOutputRow, pendingRechecks } from "../src/core/merge.js";
+import { applyUpdates, fromResumeFile, importRow, planForClaude, toResumeFile } from "../src/core/plan.js";
 
 const person = () => importRow({
   headers: ["名前", "生年月日", "介護度", "歩き方"],
@@ -70,16 +70,49 @@ test("1列にまとめて書かれた文は、下の欄が埋まっていれば�
 test("計画書を選んだ値はケアプランへ同意があれば戻り、ケアプランの値を選べば戻らない", () => {
   const imported = person();
   const { conflicts } = merge(imported, { 要介護度: "要支援2" });
-  chooseConflict(imported, conflicts[0], true);
+  chooseConflict(imported, conflicts[0], "incoming");
   assert.equal(imported.plan.care.level.value, "要支援2");
   imported.plan.consentInput.care = "yes";
   const row = (state) => buildInputRow({ input: state.input, plan: state.plan, fromOutput: state.fromOutput }).row;
   assert.equal(row(imported)[2], "要支援2");
   imported.plan.consentInput.care = "unasked";
   assert.equal(row(imported)[2], "要介護1");
-  chooseConflict(imported, conflicts[0], false);
+  chooseConflict(imported, conflicts[0], "current");
   imported.plan.consentInput.care = "yes";
   assert.equal(row(imported)[2], "要介護1");
+});
+
+test("違う値を今回の聞き取りで確かめるなら、欄を空にして、聞いた値を入れられるようにする", () => {
+  const imported = person();
+  const { conflicts } = merge(imported, { 要介護度: "要支援2" });
+  chooseConflict(imported, conflicts[0], "ask");
+  assert.equal(imported.plan.care.level.status, "undecided");
+  assert.equal(imported.plan.care.level.value, null);
+  assert.deepEqual(pendingRechecks(imported).map((r) => r.key), ["care.level"]);
+  // 空なので Claude に古い値が届かず、声メモの値を止めない
+  assert.equal(planForClaude(imported.plan).care.level.value, null);
+  assert.deepEqual(applyUpdates(imported.plan, [{ path: "care.level", value: "要介護2" }], 1), []);
+  assert.equal(imported.plan.care.level.value, "要介護2");
+  assert.deepEqual(pendingRechecks(imported), []);
+  // 聞いて変わった値は、同意があればケアプランへ戻す
+  imported.plan.consentInput.care = "yes";
+  assert.equal(buildInputRow({ input: imported.input, plan: imported.plan, fromOutput: imported.fromOutput }).row[2], "要介護2");
+  // 値を使うと選び直したら、確かめることから外れる
+  chooseConflict(imported, conflicts[0], "current");
+  assert.equal(imported.plan.care.level.value, "要介護1");
+  assert.deepEqual(imported.rechecks, []);
+});
+
+test("手元の情報の違いも確かめられ、続き用ファイルに残る", () => {
+  const imported = importRow({ headers: ["名前", "連絡先"], row: ["岡野 ハル", "000-0000-0001"], mapping: { 名前: "self.name", 連絡先: "self.phone" } });
+  const { conflicts } = merge(imported, { 電話番号: "000-0000-0002", 氏名: "岡野ハル" });
+  assert.deepEqual(conflicts.map((c) => c.key), ["self.phone"], "空白だけの違いは違う値としない");
+  chooseConflict(imported, conflicts[0], "ask");
+  assert.equal(imported.identity["self.phone"], "");
+  assert.equal(pendingRechecks(imported)[0].label, "電話番号");
+  const back = fromResumeFile(JSON.parse(JSON.stringify(toResumeFile(imported))));
+  assert.equal(back.rechecks[0].key, "self.phone");
+  assert.equal(pendingRechecks(back).length, 1);
 });
 
 test("計画書から入った印は、続き用ファイルでも残る", () => {

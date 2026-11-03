@@ -3,7 +3,7 @@ import { decodeCsv, parseCsv } from "/core/csv.js";
 import { maskTable } from "/core/mask.js";
 import { findLeaks } from "/core/redact.js";
 import { attachOutput, checkResumedFormat, DEFAULT_TARGETS, duplicateHeaders, isOwnNumberColumn, OUTPUT_TARGETS, suspiciousHeaders } from "/core/format.js";
-import { chooseConflict, describeFlows, findPersonRow, mergeOutputRow } from "/core/merge.js";
+import { chooseConflict, describeFlows, findPersonRow, mergeOutputRow, pendingRechecks } from "/core/merge.js";
 import { fromResumeFile, importRow, serviceGaps } from "/core/plan.js";
 import { startTalk } from "/talk.js";
 
@@ -266,14 +266,40 @@ function renderMask() {
   $("send").disabled = blocked;
 
   const table = $("maskTable");
-  table.replaceChildren(el("tr", {}, el("th", { textContent: "列の見出し" }), el("th", { textContent: "送る値" })));
-  for (const c of payload.columns) {
+  // 元の値はこの画面の中だけで見せる。送る中身には入れない
+  const { rows } = state.table;
+  table.replaceChildren(el("tr", {},
+    el("th", { textContent: "列の見出し" }),
+    el("th", { textContent: rows.length > 1 ? "元の値（1件目）" : "元の値" }),
+    el("th", {}),
+    el("th", { textContent: "Claude に送る値" })));
+  for (const [i, c] of payload.columns.entries()) {
+    const original = String(rows[0]?.[i] ?? "").trim();
+    const others = c.samples.length > 1 ? [el("small", { className: "mask-others", textContent: `ほか${c.samples.length - 1}件も記号にします` })] : [];
     const value = c.withheld
       ? el("td", { className: "withheld", textContent: "送りません" })
-      : el("td", { className: "symbol", textContent: c.samples.join("、") });
-    table.append(el("tr", {}, el("td", { textContent: c.header }), value));
+      : el("td", { className: "symbol" }, c.samples[0] ?? "", ...others);
+    const row = el("tr", {},
+      el("td", { textContent: c.header }),
+      el("td", { className: "mask-original", textContent: original || "（空）" }),
+      el("td", { className: "mask-arrow", textContent: "→" }),
+      value);
+    row.classList.toggle("mask-more", i >= MASK_SHOWN);
+    table.append(row);
   }
   $("payloadRaw").textContent = JSON.stringify(payload, null, 2);
+  showMaskRows(false);
+}
+
+// はじめは一部だけ見せ、押すと全部の列を見せる
+const MASK_SHOWN = 5;
+function showMaskRows(all) {
+  const more = [...$("maskTable").querySelectorAll(".mask-more")];
+  for (const row of more) row.hidden = !all;
+  const total = more.length + MASK_SHOWN;
+  $("maskAll").hidden = more.length === 0;
+  $("maskAll").textContent = all ? "一部だけ表示する" : `すべて表示する（全${total}列）`;
+  $("maskAll").onclick = () => showMaskRows(!all);
 }
 
 let columnsRequest = 0;
@@ -311,11 +337,15 @@ function renderConfirm() {
   const { headers, rows } = state.table;
   $("whoRow").hidden = rows.length < 2;
   $("who").replaceChildren(...rows.map((row, i) => el("option", { value: String(i), textContent: `${i + 1}件目：${row[0] ?? ""}` })));
+  const fileName = state.slots.care?.name;
+  $("confirmLegend").textContent = `読み込んだケアプラン：${fileName ?? ""}`;
+  // 2列に並ぶので、列の上にそれぞれ「左は何か、右は何か」を出す
+  const legend = () => el("div", { className: "flow-row confirm-row confirm-legend" },
+    el("div", { className: "kind-care confirm-from" }, el("b", { textContent: "ケアプランの列" }), rows.length > 1 ? "と1件目の値" : "と値"),
+    el("span", { className: "flow-arrow", textContent: "→" }),
+    el("div", { className: "confirm-to" }, el("b", { textContent: "この道具の計画の欄" })));
   const table = $("confirmTable");
-  table.replaceChildren(el("tr", {},
-    el("th", { textContent: "列の見出し" }),
-    el("th", { textContent: "計画の欄" }),
-    el("th", { textContent: "手元の値（1件目）" })));
+  table.replaceChildren(legend(), Object.assign(legend(), { className: "flow-row confirm-row confirm-legend confirm-legend-second" }));
   state.results.forEach((r) => {
     const col = headers.indexOf(r.header);
     const select = el("select", { "ariaLabel": `${r.header} の欄` });
@@ -328,11 +358,16 @@ function renderConfirm() {
       select.value = "ignore";
       select.disabled = true;
     }
-    const row = el("tr", { className: select.value === "unknown" ? "unknown" : "" },
-      el("td", { textContent: r.header }),
-      el("td", {}, select, ...(ownNumber ? [el("small", { className: "own-number", textContent: "番号は触りません" })] : [])),
-      el("td", { className: "local", textContent: rows[0]?.[col] ?? "" }));
-    select.addEventListener("change", () => row.classList.toggle("unknown", select.value === "unknown"));
+    const kind = () => (select.value === "unknown" ? "kind-unknown" : "kind-care");
+    const original = String(rows[0]?.[col] ?? "").trim();
+    const row = el("div", { className: `flow-row confirm-row ${ownNumber ? "kind-keep" : kind()}` },
+      el("div", { className: "flow-from" }, el("span", { textContent: r.header }), el("span", { className: "value", textContent: original || "（空）" })),
+      el("span", { className: "flow-arrow", textContent: "→" }),
+      el("div", {}, select, ...(ownNumber ? [el("small", { className: "own-number", textContent: "番号は触りません" })] : [])));
+    select.addEventListener("change", () => {
+      row.classList.toggle("kind-unknown", select.value === "unknown");
+      row.classList.toggle("kind-care", select.value !== "unknown");
+    });
     table.append(row);
   });
 }
@@ -442,7 +477,7 @@ function clearFlows() {
 const FLOW_GROUPS = [
   ["unknown", "選んでください", ""],
   ["care", "ケアプランから渡す", "ケアプラン"],
-  ["plan", "前の計画書から渡す", "前の計画書"],
+  ["plan", "入れた計画書から渡す", "入れた計画書"],
   ["talk", "訪問で聞いて渡す", "訪問で聞く"],
   ["hand", "手で入れて渡す", "手で入れる"],
   ["auto", "自動で入る", ""],
@@ -471,7 +506,7 @@ function renderFlows() {
   ]);
   $("formatSummary").replaceChildren(...sources,
     el("span", { className: "flow-to-all", textContent: "→" }),
-    el("div", { className: "flow-goal" }, "個別避難計画書", el("b", { textContent: `${state.formatName}の様式 ${columns.length}列` })));
+    el("div", { className: "flow-goal" }, "渡す個別避難計画書", el("b", { textContent: `${state.formatName}の様式 ${columns.length}列` })));
 
   $("formatTable").replaceChildren(...FLOW_GROUPS.filter(([kind]) => count(kind) > 0).map(([kind, title]) => el("section", { className: `flow-group kind-${kind}` },
     el("h3", { className: "flow-head" }, title, el("small", { textContent: `${count(kind)}列` })),
@@ -513,14 +548,14 @@ function flowRow(row) {
   const from = row.talked
     ? [el("span", { textContent: "訪問で聞いた値" }), el("span", { className: "value", textContent: row.talked.join("、") })]
     : row.from.length > 0
-      ? row.from.flatMap((c) => [el("span", { textContent: kind === "plan" ? "前の計画書" : kind === "keep" ? "計画書の番号" : c.header }), el("span", { className: "value", textContent: c.value })])
+      ? row.from.flatMap((c) => [el("span", { textContent: kind === "plan" ? "入れた計画書" : kind === "keep" ? "計画書の番号" : c.header }), el("span", { className: "value", textContent: c.value })])
       : [el("span", { className: "plain", textContent: FLOW_PLAIN[kind] })];
   return el("div", { className: "flow-row" },
     el("div", { className: "flow-from" }, ...from),
     el("span", { className: "flow-arrow", textContent: "→" }),
     el("div", { className: "flow-to", textContent: header }),
     edit,
-    ...(row.differs ? [el("div", { className: "flow-differs", textContent: `計画書は「${row.differs}」です。次の画面でどちらを使うか選びます。` })] : []),
+    ...(row.differs ? [el("div", { className: "flow-differs", textContent: `入れた計画書は「${row.differs}」です。次の画面で扱いを選びます。` })] : []),
     select);
 }
 
@@ -554,18 +589,24 @@ function renderMerge(merge) {
   const { filled, conflicts, unread, helpers } = merge;
   $("mergeFilled").hidden = filled.length === 0;
   $("mergeFilled").textContent = `計画書から入った欄：${filled.map((f) => f.label).join("、")}`;
-  $("mergeConflicts").replaceChildren(...conflicts.map((c) => {
-    const select = el("select", { ariaLabel: `${c.label} に使う値` });
-    select.append(el("option", { value: "current", textContent: `${state.table ? "ケアプラン" : "今の値"}：${c.current}` }), el("option", { value: "incoming", textContent: `計画書：${c.incoming}` }));
+  const conflictRows = conflicts.map((c) => {
+    const select = el("select", { ariaLabel: `${c.label} の扱い` });
+    select.append(
+      el("option", { value: "ask", textContent: "今回の聞き取りで確かめる（欄は空にします）" }),
+      el("option", { value: "current", textContent: `ケアプランの値を使う：${c.current}` }),
+      el("option", { value: "incoming", textContent: `計画書の値を使う：${c.incoming}` }),
+    );
+    select.value = (state.imported.rechecks ?? []).some((r) => r.key === c.key) ? "ask" : "current";
     select.addEventListener("change", () => {
-      chooseConflict(state.imported, c, select.value === "incoming");
+      chooseConflict(state.imported, c, select.value);
       renderResult(state.imported);
     });
     return el("div", { className: "merge-conflict" }, el("span", { textContent: `${c.label}が違います` }), select);
-  }));
+  });
+  $("mergeConflicts").replaceChildren(...(conflictRows.length ? [el("p", { className: "merge-conflict-note", textContent: "どちらが今の情報か分からないときは、ご本人に確かめます。" })] : []), ...conflictRows);
   const notes = [];
   if (conflicts.length === 0 && filled.length === 0) notes.push("計画書から新しく入った欄はありません。");
-  if (helpers.length > 0) notes.push(`前の計画書に手伝う人がいます（${helpers.join("、")}）。今も頼めるかを話の中で確かめ、印を付けてください。`);
+  if (helpers.length > 0) notes.push(`入れた計画書に手伝う人がいます（${helpers.join("、")}）。今も頼めるかを話の中で確かめ、印を付けてください。`);
   if ((state.imported.leftovers ?? []).length > 0) notes.push(`1列にまとめて書かれていた文は、欄に分けず手元に残しました：${state.imported.leftovers.map((l) => l.label).join("、")}`);
   if (unread.length > 0) notes.push(`形を読めなかったので入れていません：${unread.join("、")}`);
   $("mergeNotes").replaceChildren(...notes.map((n) => el("li", { textContent: n })));
@@ -593,6 +634,8 @@ async function confirmFormat() {
   const merge = data && who >= 0
     ? mergeOutputRow(state.imported, { headers: data.headers, row: data.rows[who], targets: state.imported.output.targets, blankValue: state.imported.output.blankValue })
     : null;
+  // 違う値は、どちらかを黙って使わず、今回の聞き取りで確かめるところから始める
+  for (const conflict of merge?.conflicts ?? []) chooseConflict(state.imported, conflict, "ask");
   // 訪問の途中で変えたときは、話の画面へ戻る
   if (state.backToTalk) {
     const fromWrap = state.fromWrap;
@@ -669,6 +712,7 @@ function renderResult({ identity, plan, notes }) {
 
   const isFilled = (path) => path.split(".").reduce((o, k) => o?.[k], plan)?.status === "filled";
   const topics = TALK_TOPICS.filter(([, paths]) => paths.length === 0 || !paths.every(isFilled)).map(([text]) => text);
+  for (const { label } of pendingRechecks(state.imported).reverse()) topics.unshift(`${label}（2つのデータで違うので確かめる）`);
   if (!plan.care.mobility.value) topics.unshift("歩き方や、避難のときに気をつけること");
   if (!identity["emergency.name"]) topics.unshift("もしものときの連絡先");
   const gaps = serviceGaps(plan);

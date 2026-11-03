@@ -1,6 +1,7 @@
 // 訪問終了の画面。今日できたことと次の一歩、同意、本人の1枚、個別避難計画書の CSV、ケアプラン用の CSV、続き用ファイル
 import { toResumeFile } from "/core/plan.js";
 import { askedHelpers, buildInputRow, GROUP_LABEL, hasInputConsent, inputConsentGroups, planFieldList, requiredBlanks } from "/core/format.js";
+import { pendingRechecks } from "/core/merge.js";
 import { buildOneSheet, buildSummary, buildVillageRow, hasCityConsent, toCsvText } from "/core/output.js";
 import { REQUEST_NOTE } from "/core/talk.js";
 
@@ -33,6 +34,7 @@ export function startWrap(state, findings, config) {
 
   function renderSummary() {
     const { done, next } = buildSummary(plan, state.findings?.() ?? findings, state.customs);
+    for (const { label } of pendingRechecks(state)) next.unshift(`次に確かめる：${label}（2つのデータで違っていました）`);
     const unfinished = state.unfinishedMemos?.() ?? 0;
     if (unfinished > 0) next.unshift(`計画に入っていない話が${unfinished}件あります（声メモ、確認の途中の案）。話に戻って確かめてください`);
     if (state.checking) next.unshift("いま点検しています。終わると、ここに指摘が入ります");

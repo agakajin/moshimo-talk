@@ -123,9 +123,6 @@ dd { margin: 0; }
   .talk-col { max-height: calc(100vh - 104px); overflow-y: auto; padding-right: 2px; }
   .wrap-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
   .wrap-col { min-width: 0; }
-  #confirmTable { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); column-gap: 24px; }
-  #confirmTable tr { display: grid; grid-template-columns: 8em minmax(0, 1fr) minmax(0, 1fr); align-items: center; }
-  #confirmTable tr:first-child { display: none; }
 }
 #planFields { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 2px 10px; }
 #planFields .change-box { grid-column: 1 / -1; }
@@ -267,6 +264,21 @@ body:not(.home) #hero, body.home .top, body.home .steps { display: none; }
 .kind-plan { --kind: #2b5c9e; --kind-soft: #e6eef8; }
 .kind-talk { --kind: var(--warn); --kind-soft: var(--warn-soft); }
 .kind-hand, .kind-auto, .kind-keep, .kind-none { --kind: var(--muted); --kind-soft: var(--ground); }
+/* 列を確かめる：左はケアプランにあったもの、右はこの道具の欄 */
+.flow-row.confirm-row { grid-template-columns: minmax(0, 1fr) 1.5em minmax(0, 1.1fr); }
+.flow-row.confirm-row select { grid-column: auto; }
+.flow-row.confirm-legend { border-left-color: transparent; background: none; font-size: 14px; }
+.confirm-legend .flow-arrow { color: var(--muted); }
+.confirm-from { color: var(--accent); }
+.confirm-to { color: var(--ink); }
+.confirm-from b, .confirm-to b { font-size: 15px; }
+.confirm-legend-second { display: none; }
+@media (min-width: 1100px) { .flow-row.confirm-legend-second { display: grid; } }
+.merge-conflict-note { margin: 0 0 6px; font-size: 14px; color: var(--muted); }
+.mask-all { margin-top: 10px; }
+.mask-original { overflow-wrap: anywhere; }
+.mask-arrow { width: 2em; color: var(--muted); font-weight: 700; text-align: center; }
+.mask-others { display: block; color: var(--muted); font-family: inherit; font-size: 13px; }
 .own-number { display: block; color: var(--muted); font-size: 13px; }
 .kind-unknown { --kind: var(--error); --kind-soft: var(--error-soft); }
 .flow-summary { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 4px 0 14px; }

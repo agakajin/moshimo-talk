@@ -120,10 +120,11 @@
     </section>
 
     <section id="step2" class="panel" hidden>
-      <h2>Claude に送るのは、これだけです</h2>
-      <p class="hint">本物の値は記号に置き換えました。対応表はこの画面の中だけにあります。</p>
+      <h2>個人情報を守るため、次のように置き換えて処理します</h2>
+      <p class="hint">本物の値は記号に置き換え、列の見出しと記号だけを Claude に送ります。元の値と対応表は、この画面の中だけにあります。</p>
       <div id="suspect" class="error" role="alert" hidden></div>
       <div class="scroll"><table id="maskTable"></table></div>
+      <button id="maskAll" class="button mask-all" type="button" hidden></button>
       <details>
         <summary>送る中身をそのまま見る</summary>
         <pre id="payloadRaw"></pre>
@@ -139,12 +140,13 @@
     <section id="step3" class="panel" hidden>
       <h2>列の読み取りを確かめる</h2>
       <p id="modeNotice" class="notice" hidden></p>
-      <p class="hint">右の「手元の値」は、この画面の中だけで表示しています。違っていれば選び直してください。</p>
+      <p class="hint">Claude が列の名前から読んだ結果です。違っていれば右の欄を選び直してください。値はこの画面の中だけで表示しています。</p>
       <div id="whoRow" class="row who" hidden>
         <label for="who">どの方の計画を作りますか</label>
         <select id="who"></select>
       </div>
-      <div class="scroll"><table id="confirmTable"></table></div>
+      <p id="confirmLegend" class="hint"></p>
+      <div id="confirmTable" class="flow-list"></div>
       <p id="confirmError" class="error" role="alert" hidden></p>
       <div class="row">
         <button id="confirm" class="button primary">この内容で確定する</button>
@@ -279,7 +281,7 @@
               <div id="localFields"></div>
               <p id="localError" class="error" role="alert" hidden></p>
               <div id="localLeftBox" hidden>
-                <p class="field-label">前の計画書の文（欄に分けていません）</p>
+                <p class="field-label">入れた計画書の文（欄に分けていません）</p>
                 <ul id="localLeft" class="people"></ul>
               </div>
             </details>

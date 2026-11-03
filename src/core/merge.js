@@ -62,7 +62,7 @@ export function mergeOutputRow(imported, { headers, row, targets, blankValue = "
       if (!current) {
         imported.identity[target] = parsed[target];
         result.filled.push({ label: header, value: parsed[target] });
-      } else if (current !== parsed[target]) {
+      } else if (compact(current) !== compact(parsed[target])) {
         result.conflicts.push({ key: target, label: header, current, incoming: parsed[target], local: true });
       }
       return;
@@ -95,7 +95,7 @@ function fillField(imported, path, label, value, result) {
   }
 }
 
-// 前の計画書の名前を手元に入れる。今も頼めるかは分からないので、「頼めた」の印は付けない
+// 入れた計画書の名前を手元に入れる。今も頼めるかは分からないので、「頼めた」の印は付けない
 function addHelper(imported, { name, relation, phone }, number, result) {
   if (!name && !relation) return;
   const alias = safeAlias(relation, number);
@@ -142,14 +142,22 @@ export function describeFlows({ columns, input = null, plan = null, planHeaders 
   return { rows, unused };
 }
 
-// 違っていた欄で、どちらの値を使うかを決める
-export function chooseConflict(imported, { key, current, incoming, local }, useIncoming) {
-  const value = useIncoming ? incoming : current;
+// 違っていた欄の扱いを決める。"current" と "incoming" はその値を使い、"ask" は欄を空にして今回の聞き取りで確かめる
+export function chooseConflict(imported, conflict, choice) {
+  const { key, label, current, incoming, local } = conflict;
+  imported.rechecks = (imported.rechecks ?? []).filter((r) => r.key !== key);
+  if (choice === "ask") imported.rechecks.push({ key, label, current, incoming, local });
+  const value = choice === "ask" ? null : choice === "incoming" ? incoming : current;
   if (local) {
-    imported.identity[key] = value;
+    imported.identity[key] = value ?? "";
     return;
   }
-  getAt(imported.plan, key).value = value;
+  Object.assign(getAt(imported.plan, key), { ...field(), ...(value === null ? {} : { value, status: "filled", source: "csv" }) });
   imported.fromOutput = imported.fromOutput.filter((p) => p !== key);
-  if (useIncoming) imported.fromOutput.push(key);
+  if (choice === "incoming") imported.fromOutput.push(key);
+}
+
+// 確かめることのうち、まだ欄が空のもの
+export function pendingRechecks({ rechecks = [], plan, identity = {} }) {
+  return rechecks.filter(({ key, local }) => (local ? !identity[key] : getAt(plan, key)?.status !== "filled"));
 }

@@ -61,22 +61,22 @@
 
       <h3>読み取りを確かめます</h3>
       <ol>
-        <li><b>送る中身を見る：</b>Claude に送るのは列の見出しと記号だけです。本物の値は「文字列1」のような記号に置き換わっています。</li>
-        <li><b>列を確かめる：</b>Claude が読んだ「この列は何か」が合っているかを見ます。違っていれば選び直します。</li>
+        <li><b>送る中身を見る：</b>Claude に送るのは列の見出しと記号だけです。本物の値は「文字列1」のような記号に置き換わっています。はじめは一部の列だけが出ます。「すべて表示する」で全部の列を確かめられます。</li>
+        <li><b>列を確かめる：</b>左がケアプランにあった列と値、右がこの道具の計画の欄です。Claude の読み取りが違っていれば、右を選び直します。</li>
         <li><b>渡す様式を選ぶ：</b>どの値がどの列へ渡るかを見ます。</li>
       </ol>
       <div class="guide-scene" aria-hidden="true">
         <div class="flow-list">
           <div class="kind-care flow-row"><div class="flow-from"><span>利用者名</span><span class="value">岡野 ハル</span></div><span class="flow-arrow">→</span><div class="flow-to">氏名</div><span class="button mini">直す</span></div>
-          <div class="kind-plan flow-row"><div class="flow-from"><span>前の計画書</span><span class="value">ミドリ区自治会</span></div><span class="flow-arrow">→</span><div class="flow-to">自治会名</div><span class="button mini">直す</span></div>
+          <div class="kind-plan flow-row"><div class="flow-from"><span>入れた計画書</span><span class="value">ミドリ区自治会</span></div><span class="flow-arrow">→</span><div class="flow-to">自治会名</div><span class="button mini">直す</span></div>
           <div class="kind-talk flow-row"><div class="flow-from"><span class="plain">訪問で聞く</span></div><span class="flow-arrow">→</span><div class="flow-to">避難場所</div><span class="button mini">直す</span></div>
         </div>
       </div>
-      <p>緑はケアプランから、青は前の計画書から、オレンジは訪問で聞くものです。合っていなければ「直す」を押します。</p>
+      <p>緑はケアプランから、青は最初の画面で右の枠に入れた計画書から、オレンジは訪問で聞くものです。合っていなければ「直す」を押します。</p>
       <p>管理番号や利用者番号は、持ち主ごとに別のものなので触りません。ケアプランの番号を計画書へ移さず、計画書にある番号はそのまま残し、新しく付けることもしません。</p>
 
-      <h3>2つの値が違うときは、人が選びます</h3>
-      <p>たとえばケアプランが「要介護1」、計画書が「要支援2」なら、「話すこと」の画面でどちらを使うかを選びます。道具が黙って決めることはありません。別の方の行も、名前と生年月日が合わなければ入りません。</p>
+      <h3>2つの値が違うときは、今回の聞き取りで確かめます</h3>
+      <p>たとえばケアプランが「要介護1」、計画書が「要支援2」なら、はじめは欄を空にして、訪問で確かめる問いを出します。今の情報がはっきりしているときは、「話すこと」の画面でどちらかの値を選べます。道具が黙って決めることはありません。別の方の行も、名前と生年月日が合わなければ入りません。</p>
     </section>
 
     <section id="talk" class="panel">
@@ -97,7 +97,7 @@
         <li><b>赤い欄</b>は、渡す様式で必須なのにまだ空いている欄です。全部を今日埋めなくても大丈夫です。</li>
         <li><b>入った欄が違うとき</b>は「移す」で別の欄へ移します。どの欄も手で直せて、人が直した欄は AI が上書きしません。</li>
         <li><b>欄に入らなかった声メモ</b>は、計画の欄へドラッグして入れます。</li>
-        <li><b>手伝う人</b>は、実際に頼めたら人が「頼めた」に印を付けます。前の計画書に名前があっても、今も頼めるかを確かめてください。</li>
+        <li><b>手伝う人</b>は、実際に頼めたら人が「頼めた」に印を付けます。入れた計画書に名前があっても、今も頼めるかを確かめてください。</li>
       </ul>
       <p>話が進むと、左に「気になること」と「小さな頼みごと」が出ます。まず1つ選べば十分です。話し終えたら、右上の「訪問終了」を押します。</p>
     </section>
