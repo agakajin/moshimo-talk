@@ -33,7 +33,7 @@ const TARGETS = {
 };
 // 話すことと、それで埋まる欄。もう片方のデータで分かっている話は聞かない
 const TALK_TOPICS = [
-  ["大雨の夜の様子と、心配な災害", ["hazards.items"]],
+  ["もしものときに心配なこと", ["hazards.items"]],
   ["逃げる先", ["evacuation.place"]],
   ["誰と、何で、何分で行くか", ["evacuation.means", "evacuation.moveMinutes"]],
   ["ご近所で顔を知っている人", []],
