@@ -5,7 +5,7 @@ const TOPICS = [
   {
     id: "hazards",
     // 寝室が分かっていれば聞き直さない
-    opener: (c) => (c.bedroom ? `${c.bedroom}で寝ていらっしゃるのですね。大雨の夜に心配なことはありますか？` : "大雨の夜は、いつもどの部屋で寝ていますか？"),
+    opener: (c) => (c.bedroom ? `${c.bedroom}で寝ていらっしゃるのですね。もしものときに、心配なことはありますか？` : "もしものときに、心配なことはありますか？"),
     done: (p) => filled(p.hazards.items),
     fills: ["hazards.items"],
   },

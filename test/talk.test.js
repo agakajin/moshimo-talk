@@ -38,7 +38,7 @@ test("寝室が分かっていれば聞き直さない", () => {
   const { plan } = okano();
   assert.match(nextTopic(plan, {}).text, /家の裏の部屋で寝ていらっしゃる/);
   plan.home.bedroom.value = null;
-  assert.equal(nextTopic(plan, {}).text, "大雨の夜は、いつもどの部屋で寝ていますか？");
+  assert.equal(nextTopic(plan, {}).text, "もしものときに、心配なことはありますか？");
 });
 
 test("持ち出しは要点だけが入る", () => {

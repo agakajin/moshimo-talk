@@ -75,7 +75,7 @@ new は計画に当たる内容が無く、話の中で聞く必要がある列�
 export const SCRIBE_PATHS = [
   "hazards.items", "hazards.noOthers",
   "home.community", "home.usualRoom", "home.bedroom", "home.aloneHours", "home.hazardNote",
-  "care.mobility", "care.stairs", "care.hearing", "care.household",
+  "care.level", "care.mobility", "care.stairs", "care.hearing", "care.household",
   "evacuation.place", "evacuation.means", "evacuation.route", "evacuation.prepMinutes", "evacuation.moveMinutes",
   "timeBands", "contactMeans", "carry",
   "considerations.items", "considerations.noOthers",
@@ -87,12 +87,12 @@ export const SCRIBE = {
   system: `${SHARED}
 
 あなたは書き取り役です。人が聞いた話の声メモを読み、計画に書き込むことだけを答えます。
-声メモの多くは、聞いた人が本人に確かめながら復唱した言葉です。「〜なんですね」「〜ということですね」は、話された内容として書き込みます。答えをまだ聞いていない問いかけ（「〜はどうしますか」「〜はいらっしゃいますか」）は書き込みません。
+声メモの多くは、聞いた人が本人に確かめながら復唱した言葉です。「〜なんですね」「〜ということですね」「〜ですよね」は、話された内容として書き込みます。答えをまだ聞いていない問いかけ（「〜はどうしますか」「〜はいらっしゃいますか」）は書き込みません。
 
 欄の意味：
 hazards.items 心配な災害（土砂、洪水 など）／hazards.noOthers ほかの災害は心配していないと話したとき "true"
 home.community 自治会／home.usualRoom 普段いる部屋／home.bedroom 寝室／home.aloneHours 一人になる時間帯／home.hazardNote 家の中と周辺の危険個所
-care.mobility 歩き方／care.stairs 階段の昇り降り／care.hearing 聞こえ方／care.household 同居の有無
+care.level 要介護度（「要支援2」のように種類と数字を話したときだけ。「2」だけなら書かない）／care.mobility 歩き方／care.stairs 階段の昇り降り／care.hearing 聞こえ方／care.household 同居の有無
 evacuation.place 逃げる先（聞いた呼び方のまま）／evacuation.means 何で行くか／evacuation.route 家のまわりの道と、そこをどう通るか
 evacuation.prepMinutes 準備の分数／evacuation.moveMinutes 移動の分数（どちらも数字だけ。「1時間」なら 60）
 timeBands 1週間の過ごし方と、誰がそばにいるか／contactMeans 避難の知らせを受ける手段（それしかないと話したら「固定電話のみ」のように書く）

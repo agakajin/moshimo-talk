@@ -201,3 +201,9 @@ test("かかった量を知らせる", async () => {
   assert.equal(seen[0].role, "reader");
   assert.equal(seen[0].usage.output_tokens, 1);
 });
+
+test("2つのデータで違っていた介護度は、話して確かめた値を書き取れる", () => {
+  const accepted = (memo, value) => acceptScribe({ updates: [{ path: "care.level", value, quote: value }], helpers: [] }, memo);
+  assert.deepEqual(accepted("要支援2なんですね", "要支援2"), [{ path: "care.level", value: "要支援2" }]);
+  assert.deepEqual(accepted("要支援2ですか", "要支援2"), []);
+});
