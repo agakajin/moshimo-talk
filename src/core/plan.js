@@ -49,6 +49,15 @@ const IDENTITY = {
   "emergency.name": normalizeName,
   "emergency.phone": normalizePhone,
 };
+// 手元の情報を画面で直す。Claude には送らない
+// 読めない値では元の値を消さず、null を返す
+export function setIdentity(identity, key, value) {
+  const text = value.trim();
+  const normalized = text === "" ? "" : IDENTITY[key](text);
+  if (text !== "" && !normalized) return null;
+  identity[key] = normalized;
+  return normalized;
+}
 const TEXT_FIELDS = ["care.mobility", "care.stairs", "care.hearing", "care.household", "home.usualRoom", "home.bedroom", "home.hazardNote"];
 
 const getAt = (obj, path) => path.split(".").reduce((o, k) => o?.[k], obj);
@@ -101,8 +110,8 @@ export function serviceGaps(plan) {
 export function planForClaude(plan) {
   const copy = structuredClone(plan);
   if (copy.care.weekly.value) delete copy.care.weekly.value.unread;
-  // CSV の「計画に無い欄」は中身が分からない（主治医の名前や番号のこともある）ので、値は手元に残す
-  for (const f of Object.values(copy.extra ?? {})) if (f.source === "csv" && f.value !== null) f.value = "手元にあります";
+  // 「計画に無い欄」は中身が分からない（主治医の名前や番号のこともある）。声で話した値のほかは手元に残す。手で直した値も同じ
+  for (const f of Object.values(copy.extra ?? {})) if (f.source !== "voice" && f.value !== null) f.value = "手元にあります";
   return copy;
 }
 
@@ -158,7 +167,7 @@ export function fieldsBefore(plan, updates) {
 export function placedFields(plan, before, memoId) {
   return new Map([...before].filter(([path]) => {
     const f = getAt(plan, path);
-    return f.source === "voice" && f.memoId === memoId;
+    return f.source === "voice" && f.memoId === memoId && f.value !== before.get(path).value;
   }));
 }
 
@@ -180,8 +189,8 @@ export function moveField(plan, from, to, { previous = null, overwrite = false, 
 }
 
 // 続き用ファイル。本人を特定する情報を含むので、書き出した人の責任で扱う
-export function toResumeFile({ identity, plan, notes, people, customs = [], input = null, output = null }) {
-  return { kind: "hinan-hanashi-resume", version: 1, identity, plan, notes, people, customs, input, output };
+export function toResumeFile({ identity, plan, notes, people, customs = [], input = null, output = null, looseMemos = [] }) {
+  return { kind: "hinan-hanashi-resume", version: 1, identity, plan, notes, people, customs, input, output, looseMemos };
 }
 
 function mergeShape(base, loaded) {
@@ -208,6 +217,7 @@ export function fromResumeFile(data) {
     notes: data.notes ?? "",
     people: Array.isArray(data.people) ? data.people : [],
     customs: Array.isArray(data.customs) ? data.customs : [],
+    looseMemos: Array.isArray(data.looseMemos) ? data.looseMemos.filter((m) => typeof m === "string") : [],
     input: data.input ?? null,
     output: data.output ?? null,
   };

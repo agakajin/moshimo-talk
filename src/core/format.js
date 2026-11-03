@@ -1,5 +1,6 @@
 // 様式：CSV の見出しと、そこへ入れる内容の対応。入口と出口の2つを持ち、聞く欄は両方を合わせたものにする
 // 仕組みは様式の数を問わない。ミント市の見本で3つ目の形を確かめている
+import { parseMinutes } from "./normalize.js";
 import { field } from "./plan.js";
 import { CONTROL, looksLikeValue } from "./mask.js";
 import { findLeaks, personalKind } from "./redact.js";
@@ -52,6 +53,10 @@ export const OUTPUT_TARGETS = {
   "evacuation.means": "避難の手段",
   "evacuation.route": "避難の道のり",
   "evacuation.minutes": "避難にかかる時間（準備と移動）",
+  "evacuation.prepMinutes": "避難の準備にかかる時間",
+  "evacuation.moveMinutes": "避難の移動にかかる時間",
+  "hazards.items": "心配な災害",
+  "home.hazardNote": "家のまわりの危険",
   "evacuation.summary": "避難方法（手段と時間の文）",
   "helper1.name": "避難支援者1の氏名",
   "helper1.relation": "避難支援者1の続柄",
@@ -120,7 +125,8 @@ const GROUP = (target) => {
   if (target.startsWith("extra.")) return "other";
   if (target.startsWith("helper")) return "helper";
   if (target === "self.phone" || target.startsWith("emergency.")) return "contact";
-  if (target.startsWith("care.") || target === "considerations.all" || target === "considerations.items" || ["home.usualRoom", "home.bedroom", "home.aloneHours"].includes(target)) return "care";
+  // 持ち出しは薬、過ごし方は通院の話が入るので、避難先ではなく暮らしの同意で出す
+  if (target.startsWith("care.") || target === "considerations.all" || target === "considerations.items" || ["home.usualRoom", "home.bedroom", "home.aloneHours", "carry", "timeBands"].includes(target)) return "care";
   return "evacuation";
 };
 export const GROUP_LABEL = { contact: "連絡先", care: "歩き方と配慮", evacuation: "避難先と段取り", helper: "手伝う人", other: "その他の項目" };
@@ -196,8 +202,11 @@ export function attachOutput(imported, { base = {}, name, columns }) {
 // 続き用ファイルの様式を信じない。見出しを調べ、常に出す列や同意の分類は対応から作り直す
 export function checkResumedFormat(imported) {
   const { output, customs = [] } = imported;
-  const headers = [...(output?.columns ?? []), ...customs.map((c) => c.label)];
-  const repeated = duplicateHeaders(output?.columns ?? []);
+  const weekly = imported.plan?.care?.weekly?.value;
+  const brokenWeek = weekly !== null && weekly !== undefined && !Array.isArray(weekly.items);
+  if (brokenWeek || (output && !Array.isArray(output.columns)) || (imported.input && !Array.isArray(imported.input.headers))) throw new Error("続き用ファイルの形が正しくありません。");
+  const headers = [...(output?.columns ?? []), ...customs.map((c) => c.label), ...(imported.input?.headers ?? [])];
+  const repeated = [...duplicateHeaders(output?.columns ?? []), ...duplicateHeaders(imported.input?.headers ?? [])];
   if (repeated.length > 0) throw new Error(`同じ見出しが2つあります：${repeated.join("、")}`);
   const suspicious = suspiciousHeaders(headers, imported);
   if (suspicious.length > 0) throw new Error(`見出しに名前や番号らしいものがあります：${suspicious.join("、")}`);
@@ -242,14 +251,29 @@ export function blankColumns(output, plan) {
 // どれか1つ入れば足りる列と、全部要る列がある
 const ANY_OF = new Set(["considerations.all", "hazards.all"]);
 
+// 頼めた人を、名前のある人から順に並べる。名前のない人が1人目になると、入れた名前が列に届かない
+export function askedHelpers(plan, people = []) {
+  const named = (h) => Boolean(people.find((p) => p.alias === h.alias)?.name);
+  const asked = plan.helpers.filter((h) => h.asked);
+  return [...asked.filter(named), ...asked.filter((h) => !named(h))];
+}
+
 // 渡す様式で埋める必要があるのに空の欄。話で埋める欄と、手元の情報の欄に分けて返す
-export function requiredBlanks({ output, plan, identity = {} }) {
+export function requiredBlanks({ output, plan, identity = {}, people = [] }) {
   const fields = new Map();
   const local = [];
   let helper = null;
   for (const [header, target] of Object.entries(output?.targets ?? {})) {
     if (target === "helper1.name") {
-      if (!plan.helpers.some((h) => h.asked)) helper = header;
+      const asked = askedHelpers(plan, people);
+      if (asked.length === 0) helper = header;
+      // 頼めた人の名前は呼び名しかないと空で出る
+      else if (!people.find((p) => p.alias === asked[0].alias)?.name) local.push(header);
+      continue;
+    }
+    if (target === "helper2.name") {
+      const second = askedHelpers(plan, people)[1];
+      if (second && !people.find((p) => p.alias === second.alias)?.name) local.push(header);
       continue;
     }
     if (target.startsWith("self.") || target.startsWith("emergency.")) {
@@ -257,7 +281,8 @@ export function requiredBlanks({ output, plan, identity = {} }) {
       continue;
     }
     const paths = expand(target).filter((p) => getAt(plan, p) && "status" in getAt(plan, p));
-    const empty = paths.filter((p) => !filled(getAt(plan, p)));
+    // 「30分から1時間」のように読めない時間は、書き出しで空になるので空きとして見せる
+    const empty = paths.filter((p) => !filled(getAt(plan, p)) || (p.endsWith("Minutes") && parseMinutes(getAt(plan, p).value) === null));
     if (empty.length === 0) continue;
     if (ANY_OF.has(target)) {
       if (empty.length === paths.length) fields.set(paths[0], header);
@@ -283,15 +308,18 @@ export const hasInputConsent = ({ input, plan }) => inputConsentGroups({ input, 
 // 入口と同じ見出しで書き出す。元の値は残し、話で変わった欄だけを、同意があれば入れ替える
 export function buildInputRow({ input, plan }) {
   const changes = [];
+  const kept = [];
   const row = input.headers.map((header, i) => {
     const raw = input.row[i] ?? "";
     const target = input.mapping[header];
     const f = target && getAt(plan, target);
+    // 欄を空にしても、元の値は消さない。そのことを画面で知らせる
+    if (f && typeof f === "object" && "status" in f && !filled(f) && raw.trim() !== "") kept.push(header);
     if (!filled(f) || typeof f.value !== "string" || !["voice", "human"].includes(f.source) || f.value === raw) return raw;
     const group = GROUP(target);
     const allowed = plan.consentInput[group] === "yes";
     changes.push({ header, from: raw, to: f.value, group, allowed });
     return allowed ? f.value : raw;
   });
-  return { row, changes };
+  return { row, changes, kept };
 }

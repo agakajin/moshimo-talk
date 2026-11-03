@@ -36,8 +36,10 @@ export function validateColumnsPayload(payload) {
   return errors;
 }
 
-const LIMIT = 8000;
-const MAX_MEMO = 1000;
+// 様式の列は200まで。列が多い様式でも訪問の途中で止まらないよう、余裕をみる
+const LIMIT = 40000;
+// 画面の上限は1000字。伏せると長くなるので、入口は余裕をみる
+const MAX_MEMO = 3000;
 const PLAN_KEYS = new Set(Object.keys(createPlan()));
 const HELPER_KEYS = new Set(["alias", "asked", "askedBy", "awayWeekdayDaytime", "memoId"]);
 
@@ -61,12 +63,21 @@ function strings(node, out = []) {
 const hasBigNumber = (node) => (typeof node === "number" ? Math.abs(node) >= 1e6 : node !== null && typeof node === "object" && Object.values(node).some(hasBigNumber));
 
 // 計画の形にない項目は Claude まで届いてしまうので、入口で断る
+const FIELD_KEYS = new Set(["value", "status", "source", "memoId"]);
+// 欄の形でないもの（配列に分けた番号や、余分な項目）を通すと、形の検査を避けられる。週の予定だけは値が形を持つ
+const badField = (f, weekly = false) => f === null || typeof f !== "object" || Array.isArray(f) || Object.keys(f).some((k) => !FIELD_KEYS.has(k))
+  || !(f.value === null || f.value === undefined || typeof f.value === "string" || (weekly && typeof f.value === "object"));
 function hasUnknownKeys(plan) {
   const shape = createPlan();
   return Object.entries(plan).some(([section, value]) => {
     const sample = shape[section];
     // 様式から足した欄は番号で持つ
-    if (section === "extra") return Object.keys(value ?? {}).some((k) => !/^x\d{1,3}$/.test(k));
+    if (section === "extra") return Object.entries(value ?? {}).some(([k, f]) => !/^x\d{1,3}$/.test(k) || badField(f));
+    if (sample !== null && typeof sample === "object" && "status" in sample) return badField(value);
+    if (value !== null && typeof value === "object" && !Array.isArray(value) && sample !== null && typeof sample === "object" && !Array.isArray(sample)) {
+      const wrong = Object.entries(value).some(([k, f]) => sample[k] !== null && typeof sample[k] === "object" && "status" in sample[k] && badField(f, section === "care" && k === "weekly"));
+      if (wrong) return true;
+    }
     if (value === null || typeof value !== "object" || Array.isArray(value) || sample === null || typeof sample !== "object" || Array.isArray(sample) || "status" in sample) return false;
     return Object.keys(value).some((k) => !(k in sample));
   });

@@ -8,12 +8,27 @@ const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 const MAX_FINDINGS = 6;
 
 // 点検の指摘に残さない医療の判断。声メモの事実（「認知症で夜に歩く」）はここに当てない
-const MEDICAL = /診断|処方|服薬|服用|投薬|減薬|薬の量|薬[をは]?.{0,6}(?:増|減|控|やめ|止め|変え|飲|半分|大丈夫)|飲まなく|受診|治療|入院|血圧[がは]|悪化|疑われ|認知症|糖尿病|脳梗塞|心臓|病院で|医師に|診て|酸素.{0,6}(?:外|やめ|止め|減|増)/;
+const MEDICAL = /(?:薬|インスリン|歩行器|点滴|酸素|杖|車いす|補聴器|リハビリ|透析).{0,12}(?:中止|不要|要りません|いりません)|歩けるように|症状|発作|低血糖|命に関わ|切れると|(?:歩か|動か)ない(?:ほう|方)|(?:転倒|転ん|体調).{0,6}おそれ|(?:降圧|血糖|脱水|誤嚥|骨折|痛み止め|インスリン|座薬|透析).{0,20}(?:量|多い|少な|続け|相談|恐れ|危険|下が|上が|打っ|使い|控え|避け)|(?:医者|かかりつけ医).{0,12}(?:相談|診|行)|(?:足|腰|歩く|水分|食事|体(?!育)|車いす).{0,16}(?:ほうがよ|ほうがい|とよい|といい|控え)|診断|処方|服薬|服用|投薬|減薬|薬の量|薬[をは]?.{0,6}(?:増|減|控|やめ|止め|変え|飲|半分|大丈夫)|飲まなく|受診|治療|入院|血圧[がは]|悪化|疑われ|認知症|糖尿病|脳梗塞|心臓|病院で|医師に|診て|酸素.{0,6}(?:外|やめ|止め|減|増)/;
 // 書き取りで止めるのは、やめる・止めるといった指図だけ
-const MEDICAL_ORDER = /(?:薬|酸素|インスリン|透析).{0,8}(?:やめ|止め|減らす|増やす|控え|外す|外して)/;
-const PROMISE = /必ず|かならず|絶対|ぜったい|毎回|毎晩|約束|責任を持|責任をも|義務|迎えに行|迎えに来ます|してあげ|連絡します|電話します/;
+// 本人の事実（「酸素を外すと息が苦しい」「薬は半分に割って飲む」）は止めない
+const MEDICAL_ORDER = /(?:薬|酸素|インスリン|透析|降圧|痛み止め).{0,8}(?:やめ(?!た(?!ほう|方))|止め|減らす|減らし|増やす|増やし|控え|外す(?!と)|外して(?!は)|半分(?!に割)|飲まな(?!いと|くなった)|打たな(?!いと|くなった)|なくてよい|なくていい)/;
+// 体のことと人のことは、聞いていない文を計画に入れない。値の言葉が根拠の文か、今の欄の中身にあるときだけ通す（前の話を足していく欄があるため）
+const NEEDS_QUOTE = /受診|診察|入院|必ず|迎え|担当|決ま|薬|降圧|インスリン|痛み止め|認知症|血圧|血糖|透析|座薬|酸素|点滴|注射|娘|息子|嫁|婿|孫|(?<!丈)夫|妻|兄|姉|弟|妹|母|父|車|無線|電話|メール|ラジオ|テレビ/g;
+const wordsInQuote = (value, source) => {
+  const text = squeeze(source).replace(/おくすり|くすり/g, "薬").replace(/携帯/g, "携帯電話");
+  return (value.match(NEEDS_QUOTE) ?? []).every((w) => text.includes(w));
+};
+const currentValue = (plan, path) => {
+  const f = path.split(".").reduce((o, k) => o?.[k], plan);
+  return typeof f?.value === "string" ? f.value : "";
+};
+// 頼みごとの案に残さない形。「手伝います」は約束、「手を貸してください」「電話を1本お願いします」は頼みごと
+const REQUEST_BAD = /(?<!お願いし|お願いいたし|助かり)ます$|ました$|要りません|いりません|決まり|決まった|ましょう$|お任せください$|(?<!ま)[うくすつぬぶむるぐ]$|主治医|病院へ|安静|もう安心|手元にあります|\[(?:お名前|住所|日付|電話番号|郵便番号|手元の値)\]/;
+// 指摘の文に残さない約束。頼みごとの案には、下の PROMISE でさらに広く当てる。「必ず届くとは限らない」「毎晩おひとり」は事実の話
+const FIRM = /してくれます|来てくれます|ことになりました|てあげ|必ず(?!.{0,8}とは限)|かならず|絶対|ぜったい|約束|責任を持|責任をも|義務|迎えに行|迎えに来ます|してあげ|連絡します|電話します/;
+const PROMISE = /てあげ|必ず|かならず|絶対|ぜったい|毎回|毎晩|約束|責任を持|責任をも|義務|迎えに行|迎えに来ます|してあげ|連絡します|電話します/;
 // 計画は下書きなので、決まった、大丈夫と言い切る文と、相手に連絡する文、受診の指図は残さない。「まだ決まっていません」は通す
-const DECIDED = /決まっている(?:の|から)|決まっています|決まりました|決まった|完成|安全です|間に合います|連絡を入れ|連絡して|お伝えし|電話をかけ|病院へ|主治医|安静|いりません/;
+const DECIDED = /もう大丈夫|これで安心|間に合う|電話して(?!くれ|もらえ)|伝えておき|もう安心|これで大丈夫|問題ありません|心配ありません|避難できます|決まっている(?:の|から)|決まっています|決まりました|決まった(?:[。]|$|ので|から)|完成|安全です|間に合います|連絡を入れ|連絡して(?!くれ|もらえ)|お伝えし|電話をかけ(?!て?くれ|て?もらえ|られ|そう)|病院へ|主治医|安静|いりません/;
 
 export class ClaudeError extends Error {
   constructor(message, status = 502) {
@@ -63,20 +78,30 @@ const NEGATED = /(?:頼|お願い|引き受).*(?:ない|なく|なか|ません|
 const NOT_ASKED = /たい|たかった|たら|だら|ほうが|方が|ほしい|欲しい|そう|いいか|迷|けど|けれど|無理|難し|てくれるか|にくい|づらい|頼んでみ|ようと思|つもり|まだ|断られ|断わられ|返事待ち|返事を待|分から|わから/;
 const DECLINED = /断られ|断わられ|引き受けられない/;
 // 呼び名は続き柄か位置で書く。分からないものは名前かもしれないので、一般の呼び方にする
-const RELATION = /隣|近所|近く|向かい|同じ|娘|息子|嫁|婿|孫|夫|妻|兄|姉|弟|妹|親|母|父|祖|家族|友|知り合い|民生|委員|職員|ヘルパー/;
+const RELATION = /となり|奥|家内|甥|姪|いとこ|ばあ|じい|ケアマネ|長男|次男|三男|長女|次女|三女|主人|旦那|区長|班長|組長|会長|隣|近所|近く|向かい|同じ|娘|息子|嫁|婿|孫|夫|妻|兄|姉|弟|妹|親|母|父|祖|家族|友|知り合い|民生|委員|職員|ヘルパー/;
 // 音声認識は句点を打たず空白で続けるので、空白の切れ目も文の切れ目として見る。引用がまたぐときは文全体を見る
 function sentenceOf(quote, memo) {
   const sentence = memo.split(/[。！？!?\n]/).find((s) => squeeze(s).includes(squeeze(quote))) ?? "";
   return sentence.split(/[\s　]+/).find((part) => squeeze(part).includes(squeeze(quote))) ?? sentence;
 }
 // 呼び名の中心の言葉が、根拠の文に出ていること。「娘に頼んだ」を根拠に息子さんを入れない
-const namesPerson = (alias, quote) => squeeze(quote).includes(alias.match(RELATION)?.[0] ?? squeeze(alias));
+const sameNeighbor = (text) => text.replace(/となり/g, "隣");
+const namesPerson = (alias, quote) => sameNeighbor(squeeze(quote)).includes(sameNeighbor(alias.match(RELATION)?.[0] ?? squeeze(alias)));
 // 置き換えの記号のまま計画に入れると、本人の1枚と市向けの CSV に記号が出る
-const PLACEHOLDER = /\[(?:お名前|住所|日付|電話番号|郵便番号)\]/;
+const PLACEHOLDER = /\[(?:お名前|住所|日付|電話番号|郵便番号|手元の値|メール)\]|手元にあります/;
 // 答えをまだ聞いていない問いかけは、根拠にしない。文の終わりで見るので、引用から「か」を抜いても通らない
 // 「公民館ですかね」は考えながらの復唱でもあるので、ここでは捨てず Claude の判断と人の確認に任せる
 const QUESTION = /(?:ます|です|でしょう|ません|ない|ある|いる|した)か\s*$/;
-const isAsking = (quote, memo) => QUESTION.test(sentenceOf(quote, memo)) || /[?？]/.test(memo.slice(memo.indexOf(quote) + quote.length, memo.indexOf(quote) + quote.length + 1));
+// 「公民館でいい？」「公民館はどうかな」のように、相手に尋ねている文
+// 「公民館でいいです」は答えなので、「か」のあるときだけ尋ねている文と見る
+const OFFER = /(?:でいい|でよろしい)(?:です)?(?:か|かな)\s*$|(?:どうかな|いいかな|どうですか|どうでしょう|いかが)(?:です)?(?:か|かな)?\s*$/;
+function isAsking(quote, memo) {
+  const sentence = sentenceOf(quote, memo);
+  if (QUESTION.test(sentence) || OFFER.test(sentence)) return true;
+  // 文の終わりの「？」も見る。引用が文の途中まででも通さない
+  const at = memo.indexOf(sentence);
+  return at >= 0 && /[?？]/.test(memo.slice(at + sentence.length, at + sentence.length + 1));
+}
 
 export function acceptColumns(results, columns, targets = READER_TARGETS) {
   const byHeader = new Map(results.map((r) => [r.header, r]));
@@ -89,7 +114,7 @@ export function acceptColumns(results, columns, targets = READER_TARGETS) {
 }
 
 // メモに根拠の無い書き込みは捨てる。聞いていないことを計画に入れない
-export function acceptScribe({ updates, helpers }, memo, fields = []) {
+export function acceptScribe({ updates, helpers }, memo, fields = [], plan = {}) {
   const accepted = [];
   const allowed = new Set([...SCRIBE_PATHS, ...fields.map((f) => f.key)]);
   for (const { path, value, quote } of updates) {
@@ -106,7 +131,9 @@ export function acceptScribe({ updates, helpers }, memo, fields = []) {
       continue;
     }
     const text = value.trim();
-    if (text === "" || (SAME_WORDS.has(path) && !sharesWords(text, memo))) continue;
+    if (text === "" || (SAME_WORDS.has(path) && !sharesWords(text, memo)) || !wordsInQuote(text, `${sentenceOf(quote, memo)}${quote}${currentValue(plan, path)}`)) continue;
+    // 名字と同じ地名が呼び名に置き換わった文を、避難先にしない
+    if (/^(?:evacuation\.place|evacuation\.means|evacuation\.route)$/.test(path) && /^(?:本人|緊急連絡先)/.test(text)) continue;
     accepted.push({ path, value: text });
   }
   let unnamed = 0;
@@ -114,7 +141,9 @@ export function acceptScribe({ updates, helpers }, memo, fields = []) {
     if (!isQuoted(quote, memo) || isAsking(quote, memo) || alias.trim() === "" || personalKind(alias) || PLACEHOLDER.test(alias) || !namesPerson(alias, quote)) continue;
     // 頼んだかどうかは本人の1枚と CSV に直結するので、その人の文だけで確かめる
     const sentence = sentenceOf(quote, memo);
-    const reallyAsked = asked === true && ASKED.test(sentence) && !NOT_ASKED.test(sentence) && !NEGATED.test(sentence);
+    // 「娘に頼みました、隣の人には来週話します」で隣の人を頼めたにしない。その人を含む節だけで見る
+    const clause = sentence.split(/[、,，]/).find((part) => namesPerson(alias, part)) ?? sentence;
+    const reallyAsked = asked === true && ASKED.test(clause) && !NOT_ASKED.test(sentence) && !NEGATED.test(sentence);
     const declined = DECLINED.test(sentence);
     unnamed += RELATION.test(alias) ? 0 : 1;
     const name = RELATION.test(alias) ? alias.trim() : unnamed === 1 ? "近くの人" : `近くの人${unnamed}`;
@@ -131,9 +160,13 @@ export function acceptFindings(findings, yardsticks) {
   for (const f of findings) {
     const index = labels.indexOf(f.yardstick);
     if (index < 0 || accepted.length >= MAX_FINDINGS) continue;
-    if ([f.text, f.opener, f.request].some((t) => t && (MEDICAL.test(t) || personalKind(t)))) continue;
-    if ([f.text, f.opener].some((t) => t && (PROMISE.test(t) || DECIDED.test(t)))) continue;
-    const interrupt = f.interrupt === true && Boolean(f.opener);
+    // 「透析の日の昼に、そばにいる人をまだ聞けていません」は医療の判断ではない
+    // まだ聞けていないという指摘と、場所を尋ねる問いかけは、判断でも約束でもない
+    const notAsked = (t) => /(?:聞けて|聞いて|書かれて|話せて)いません[。]?$|聞いておきたいです[。]?$|(?:どこ|どちら|どなた|誰).*か[。？]?$/.test(t);
+    const bad = (t) => personalKind(t) || (!notAsked(t) && (MEDICAL.test(t) || FIRM.test(t) || DECIDED.test(t)));
+    // 指摘の文がだめなら捨てる。問いかけだけがだめなら、問いかけだけ外す（一緒の頼みごとの案を失わない）
+    if (f.text && bad(f.text)) continue;
+    const interrupt = f.interrupt === true && Boolean(f.opener) && !bad(f.opener);
     const kind = interrupt ? "ask" : f.request ? "request" : "note";
     // 番号は決まった作り方にする。同じ物差しの割り込みを何度も出さないため
     const base = `y${index}-${kind}`;
@@ -141,7 +174,9 @@ export function acceptFindings(findings, yardsticks) {
     seen.set(base, n);
     const finding = { id: n === 1 ? base : `${base}-${n}`, yardstick: f.yardstick, text: f.text };
     if (interrupt) Object.assign(finding, { interrupt: true, opener: f.opener });
-    if (f.request && !PROMISE.test(f.request)) finding.request = f.request;
+    // 「手伝います」のような約束は、本人の1枚に載せない
+    const asking = f.request?.replace(/（[^）]*）$/, "").replace(/[。]$/, "");
+    if (f.request && !MEDICAL.test(f.request) && !personalKind(f.request) && !PROMISE.test(f.request) && !REQUEST_BAD.test(asking)) finding.request = f.request;
     accepted.push(finding);
   }
   return accepted;
@@ -202,7 +237,7 @@ export function createClaude({ client, village, model = DEFAULT_MODEL, onUsage =
     },
     async scribe({ memo, plan, fields = [] }) {
       const answer = await ask("scribe", scribePrompt(fields), { memo, plan: summarizePlan(plan), fields });
-      const updates = acceptScribe(answer, memo, fields);
+      const updates = acceptScribe(answer, memo, fields, plan);
       // 捨てたものがあれば画面で知らせる
       return { updates, dropped: answer.updates.length + answer.helpers.length - updates.length };
     },

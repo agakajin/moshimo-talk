@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { decodeCsv, parseCsv } from "../src/core/csv.js";
-import { applyUpdates, editField, fromResumeFile, importRow, toResumeFile } from "../src/core/plan.js";
+import { createPlan, applyUpdates, editField, fromResumeFile, importRow, toResumeFile } from "../src/core/plan.js";
 import { buildOneSheet, buildSummary, buildVillageRow, evacuationSentence, hasCityConsent, toCsvText } from "../src/core/output.js";
 import { mockScribe } from "../src/server/mock-talk.js";
 import { createLimiter } from "../src/server/limits.js";
@@ -122,4 +122,50 @@ test("回数の上限を超えると止める", () => {
   assert.match(limiter.check("b").reason, /本日の上限/);
   t += 24 * 3600_000;
   assert.equal(limiter.check("b").ok, true);
+});
+
+test("今日できたこと：様式から足した欄も、話したなら数える。CSV の値は数えない", () => {
+  const plan = createPlan();
+  plan.extra.x1 = { status: "filled", value: "2階", source: "voice", memoId: 1 };
+  plan.extra.x2 = { status: "filled", value: "架空医院", source: "csv", memoId: null };
+  const { done } = buildSummary(plan, [], [{ path: "extra.x1", label: "居住階" }, { path: "extra.x2", label: "主治医" }]);
+  assert.deepEqual(done, ["話せたこと：居住階"]);
+});
+
+test("準備が未記入なのに、準備を入れてと言わない。合計の列も空にする", () => {
+  const plan = createPlan();
+  applyUpdates(plan, [{ path: "evacuation.means", value: "車" }, { path: "evacuation.moveMinutes", value: "20" }], 1);
+  assert.equal(evacuationSentence(plan, "隣の人"), "隣の人と車で、移動20分（準備の時間はこれから）");
+  const config = { columns: ["時間"], targets: { 時間: "evacuation.minutes" }, alwaysColumns: ["時間"], neverColumns: [], consentGroups: {}, blankValue: "未決定" };
+  assert.deepEqual(buildVillageRow({ plan, identity: {}, config, createdOn: "x" }), ["未決定"]);
+  applyUpdates(plan, [{ path: "evacuation.prepMinutes", value: "10" }], 2);
+  assert.equal(evacuationSentence(plan, "隣の人"), "隣の人と車で、準備を入れて30分");
+  assert.deepEqual(buildVillageRow({ plan, identity: {}, config, createdOn: "x" }), ["30"]);
+});
+
+test("CSV：ただの数字に印を付けず、数式には付ける", () => {
+  assert.equal(toCsvText(["a"], ["-5"]).split(/\r?\n/)[1], "-5");
+  assert.equal(toCsvText(["a"], ["+81"]).split(/\r?\n/)[1], "+81");
+  assert.equal(toCsvText(["a"], ["=1+1"]).split(/\r?\n/)[1], "'=1+1");
+  assert.equal(toCsvText(["a"], ["+1+cmd"]).split(/\r?\n/)[1], "'+1+cmd");
+  assert.equal(toCsvText(["a"], ["-1+1"]).split(/\r?\n/)[1], "'-1+1");
+});
+
+test("次の一歩：埋まった話は残さない。問いかけの分は残す", () => {
+  const plan = createPlan();
+  plan.nextSteps.push({ topic: "place", text: "逃げるとしたら", fills: ["evacuation.place"] }, { topic: "neighbors", text: "ご近所", fills: ["helpers"] }, { topic: "y1-ask", text: "階段は" });
+  const before = buildSummary(plan).next;
+  assert.ok(before.includes("次に話す：逃げるとしたら") && before.includes("次に話す：ご近所"));
+  applyUpdates(plan, [{ path: "evacuation.place", value: "公民館" }], 1);
+  plan.helpers.push({ alias: "隣の人", asked: false });
+  const after = buildSummary(plan).next;
+  assert.ok(!after.includes("次に話す：逃げるとしたら") && !after.includes("次に話す：ご近所"));
+  assert.ok(after.includes("次に話す：階段は"));
+});
+
+test("飛ばした問いかけは、点検で消えたら次の一歩に残さない", () => {
+  const plan = createPlan();
+  plan.nextSteps.push({ topic: "y1-ask", text: "階段は" });
+  assert.ok(buildSummary(plan, [{ id: "y1-ask", text: "階段の話" }]).next.includes("次に話す：階段は"));
+  assert.ok(!buildSummary(plan, [{ id: "y2-note", text: "別の話" }]).next.includes("次に話す：階段は"));
 });

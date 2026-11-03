@@ -1,6 +1,7 @@
 // 訪問終了で出すもの。すべて決まった通りにプログラムで作る。AI に値を作らせない
 import { parseMinutes } from "./normalize.js";
-import { DEFAULT_TARGETS } from "./format.js";
+import { askedHelpers, DEFAULT_TARGETS } from "./format.js";
+import { nameParts } from "./redact.js";
 const filled = (f) => f?.status === "filled";
 const val = (f) => (filled(f) ? f.value : "");
 
@@ -30,18 +31,21 @@ export function totalMinutes(plan) {
 }
 
 const WAITING = "（手伝う人の同意待ち）";
-const PERSON_WORD = /隣|近所|近くの人|向かい|親子|娘|むすめ|息子|嫁|婿|孫|(?<![丈工農])夫|妻|兄|姉|弟|妹|母(?!屋)|父|親|甥|姪|いとこ|おじ|おば|じいちゃん|ばあちゃん|長男|次男|三男|長女|次女|三女|主人|旦那|家内|家族|友人|友達|友だち|知人|知り合い|区長|会長|班長|組長|民生委員|ヘルパー|ケアマネ|看護師|大家|消防団|先生|(?<!たく)さん|様(?!子)/;
+const PERSON_WORD = /隣|近所|近くの人|向かい|親子|娘|むすめ|息子|嫁|婿|孫|(?<![丈工農])夫|妻|兄|姉(?!妹都市)|弟|妹(?!都市)|母(?!屋|子セ)|父|親|甥|姪|いとこ|おじ|おば(?!け)|じいちゃん|ばあちゃん|長男|次男|三男|長女|次女|三女|主人|旦那|家内|家族|友人|友達|友だち|知人|知り合い|区長|会長|班長|組長|民生委員|ヘルパー|ケアマネ|看護師|大家|消防団|先生|の人|人が|職員|社協|姑|舅|倅|連れ合い|幼なじみ|同級生|同窓|仲間|教え子|おっちゃん|となり|かあちゃん|にいちゃん|ねえちゃん|とうちゃん|せがれ|だんな|むすこ|若い衆|(?<![自住帰在社別お])宅|(?<!たく)さん|様(?!子)/;
 // 人の話に見えるが、場所や体の話の言葉は先に外す。避難先を隠さないため
-const NOT_PERSON = /(?:隣|近所|向かい)の?(?:町|村|市|区|部屋|公民館|小学校|中学校|集会所|体育館|神社|寺|公園|病院)|親水|親指|親切|親しい|模様|同様|様々/g;
+const NOT_PERSON = /(?:隣|となり|近所|向かい)の?(?:町|村|市|区|部屋|公民館|小学校|中学校|集会所|体育館|神社|寺|公園|病院|集落|地区|避難所|高台|広場)|隣接|親水|親指|親切|親しい|模様|同様|様々/g;
 // 同意がないときは、手伝う人に触れた文を市向けに出さない。言葉の一覧には限りがあるので、画面でも人が確かめる
 function withoutHelpers(text, plan, people = []) {
   // 名字だけや空白なしで書いても見つける
-  const names = [...plan.helpers.map((h) => h.alias), ...people.flatMap((p) => [p.alias, p.name, String(p.name ?? "").replace(/\s/g, ""), ...String(p.name ?? "").split(/\s+/)])].filter(Boolean);
+  const names = [...plan.helpers.map((h) => h.alias), ...people.flatMap((p) => [p.alias, p.name, String(p.name ?? "").replace(/\s/g, ""), ...String(p.name ?? "").split(/\s+/), ...nameParts(p.name)])].filter(Boolean);
   const mentions = (part) => PERSON_WORD.test(part.replace(NOT_PERSON, "")) || names.some((a) => part.includes(a));
   if (!mentions(text)) return text;
   const kept = text.split(/(?<=[。；、])/).filter((part) => !mentions(part)).join("").replace(/[、；]$/, "");
   return kept ? `${kept}${WAITING}` : WAITING;
 }
+
+// 準備が未記入なのに「準備を入れて」と言わない
+const minutesWords = (plan) => (filled(plan.evacuation.prepMinutes) ? `準備を入れて${totalMinutes(plan)}分` : `移動${totalMinutes(plan)}分（準備の時間はこれから）`);
 
 export function evacuationSentence(plan, whoLabel, people = []) {
   const means = val(plan.evacuation.means);
@@ -50,18 +54,23 @@ export function evacuationSentence(plan, whoLabel, people = []) {
   // null は「誰と」を出さないとき（手伝う人の同意がない）
   if (whoLabel === null) {
     const shown = withoutHelpers(means, plan, people);
-    return shown === means ? `${means}で、準備を入れて${minutes}分` : `手段は${WAITING}。準備を入れて${minutes}分`;
+    return shown === means ? `${means}で、${minutesWords(plan)}` : `手段は${WAITING}。${minutesWords(plan)}`;
   }
-  return `${whoLabel || "（誰と行くかは未決定）"}${whoLabel ? "と" : "。"}${means}で、準備を入れて${minutes}分`;
+  return `${whoLabel || "（誰と行くかは未決定）"}${whoLabel ? "と" : "。"}${means}で、${minutesWords(plan)}`;
 }
 
-export function buildSummary(plan, findings = []) {
+export function buildSummary(plan, findings = [], customs = []) {
   const talked = Object.entries(SECTION_LABEL)
     .filter(([path]) => {
       const f = getAt(plan, path);
       return filled(f) && f.source !== "csv";
     })
     .map(([, label]) => label);
+  // 様式から足した欄も、話したなら数える
+  for (const { path, label } of customs) {
+    const f = getAt(plan, path);
+    if (filled(f) && f.source !== "csv") talked.push(label);
+  }
   const done = [];
   if (talked.length) done.push(`話せたこと：${talked.join("、")}`);
   const sentence = evacuationSentence(plan, plan.helpers.filter((h) => h.asked).map((h) => h.alias).join("・"));
@@ -74,7 +83,13 @@ export function buildSummary(plan, findings = []) {
     if (f.request && !plan.requests.includes(f.request)) next.push(`次に考える：${f.request}`);
     if (!f.request) next.push(`次に話す：${f.text}`);
   }
-  for (const step of plan.nextSteps) next.push(`次に話す：${step.text}`);
+  const settled = (path) => {
+    const f = getAt(plan, path);
+    return Array.isArray(f) ? f.length > 0 : filled(f);
+  };
+  // 飛ばした問いかけは、点検で指摘が消えたら残さない
+  const stillAsked = (step) => step.fills || findings.length === 0 || findings.some((f) => f.id === step.topic);
+  for (const step of plan.nextSteps) if (!step.fills?.some(settled) && stillAsked(step)) next.push(`次に話す：${step.text}`);
   if (!filled(plan.evacuation.place)) next.push("次に話す：どこへ逃げるか");
   if (plan.helpers.length === 0) next.push("次に話す：ご近所で顔を知っている方");
   return { done, next: [...new Set(next)] };
@@ -89,7 +104,7 @@ export function buildOneSheet({ plan, identity, people = [] }) {
       ["どこへ", val(plan.evacuation.place)],
       ["誰と", named.join("、")],
       ["何で", val(plan.evacuation.means)],
-      ["どれくらい", totalMinutes(plan) === null ? "" : `準備を入れて ${totalMinutes(plan)} 分`],
+      ["どれくらい", totalMinutes(plan) === null ? "" : minutesWords(plan).replace(/(\d+)分/, " $1 分")],
       ["持って出るもの", val(plan.carry)],
       ["連絡先", identity["emergency.name"] ? `${identity["emergency.name"]} ${formatPhone(identity["emergency.phone"])}`.trim() : ""],
     ],
@@ -115,7 +130,7 @@ export const hasCityConsent = (plan, config) => Object.keys(config?.consentGroup
 // 出口の様式に当てはめる。同意していない項目は空にする
 export function buildVillageRow({ plan, identity, people = [], config, createdOn, serial = "仮-0001" }) {
   const helper = (i) => {
-    const h = plan.helpers.filter((x) => x.asked)[i];
+    const h = askedHelpers(plan, people)[i];
     const person = h && people.find((p) => p.alias === h.alias);
     return { name: person?.name ?? "", relation: h?.alias ?? "", phone: formatPhone(person?.phone) };
   };
@@ -146,7 +161,8 @@ export function buildVillageRow({ plan, identity, people = [], config, createdOn
     "considerations.all": considerations,
     "hazards.all": hazards,
     "evacuation.summary": evacuationSentence(plan, plan.consent.helper === "yes" ? h1.relation : null, people),
-    "evacuation.minutes": minutes === null ? "" : String(minutes),
+    // 列は準備と移動の合計なので、準備が未記入なら数字を出さない
+    "evacuation.minutes": minutes === null || !filled(plan.evacuation.prepMinutes) ? "" : String(minutes),
     "care.level": val(plan.care.level),
     none: "",
   };
@@ -169,7 +185,9 @@ export function buildVillageRow({ plan, identity, people = [], config, createdOn
 
 const csvCell = (v) => {
   // 表計算ソフトで数式として動かないようにする
-  const safe = /^[=+\-@]/.test(String(v).normalize("NFKC").trimStart()) ? `'${v}` : v;
+  // 「-5」「+81」のようなただの数字は、元の値を変えないよう印を付けない
+  const text = String(v).normalize("NFKC").trimStart();
+  const safe = /^[=+\-@]/.test(text) && !/^[+\-][\d.,\s-]*$/.test(text) ? `'${v}` : v;
   return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 };
 

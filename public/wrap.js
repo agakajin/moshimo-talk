@@ -1,6 +1,6 @@
 // 訪問終了の画面。今日できたことと次の一歩、同意、本人の1枚、市向け CSV、続き用ファイル
 import { toResumeFile } from "/core/plan.js";
-import { buildInputRow, GROUP_LABEL, hasInputConsent, inputConsentGroups, planFieldList, requiredBlanks } from "/core/format.js";
+import { askedHelpers, buildInputRow, GROUP_LABEL, hasInputConsent, inputConsentGroups, planFieldList, requiredBlanks } from "/core/format.js";
 import { buildOneSheet, buildSummary, buildVillageRow, hasCityConsent, toCsvText } from "/core/output.js";
 import { REQUEST_NOTE } from "/core/talk.js";
 
@@ -31,10 +31,11 @@ export function startWrap(state, findings, config) {
   window.scrollTo(0, 0);
 
   function renderSummary() {
-    const { done, next } = buildSummary(plan, findings);
+    const { done, next } = buildSummary(plan, state.findings?.() ?? findings, state.customs);
     const unfinished = state.unfinishedMemos?.() ?? 0;
-    if (unfinished > 0) next.unshift(`計画に入っていない声メモが${unfinished}件あります。話に戻って確かめてください`);
-    if (state.checkFailed) next.unshift("点検ができなかったので、気になることの指摘が入っていません。話に戻って「訪問終了」を押すと、もう一度点検します");
+    if (unfinished > 0) next.unshift(`計画に入っていない話が${unfinished}件あります（声メモ、確認の途中の案）。話に戻って確かめてください`);
+    if (state.checking) next.unshift("いま点検しています。終わると、ここに指摘が入ります");
+    if (state.checkFailed && !state.checking) next.unshift("点検ができなかったので、気になることの指摘が入っていません。話に戻って「訪問終了」を押すと、もう一度点検します");
     $("doneList").replaceChildren(...(done.length ? done : ["これから話します"]).map((t) => el("li", { textContent: t })));
     $("nextList").replaceChildren(...(next.length ? next : ["今日はここまでで大丈夫です"]).map((t) => el("li", { textContent: t })));
     $("askedHead").hidden = plan.requests.length === 0;
@@ -49,6 +50,7 @@ export function startWrap(state, findings, config) {
   }
 
   function renderConsent() {
+    $("consentAlways").textContent = config.alwaysColumns?.length ? `同意が1つでもあれば、次の列は本人を確かめるために一緒に出ます：${config.alwaysColumns.join("、")}` : "";
     $("consentReset").hidden = !state.consentReset;
     $("consentRows").replaceChildren(...Object.entries(config.consentGroups).map(([group, def]) => {
       const select = el("select", { ariaLabel: def.label });
@@ -60,16 +62,19 @@ export function startWrap(state, findings, config) {
         $("consentReset").hidden = true;
         renderCsvPreview();
       });
-      return el("div", { className: "plan-row consent-row" }, el("span", { className: "name", textContent: def.label }), select);
+      return el("div", { className: "plan-row consent-row" }, el("span", { className: "name", textContent: group === "other" ? `${def.label}（${def.columns.join("、")}）` : def.label }), select);
     }));
   }
 
   // 話して入れたのに、どの列にも入らない内容を隠さない
   function renderOutside() {
     const at = (path) => path.split(".").reduce((o, k) => o?.[k], plan);
-    const outside = planFieldList(state).filter((f) => f.kind !== "plan" && f.kind !== "both" && at(f.path)?.status === "filled" && at(f.path)?.source !== "csv");
+    const outside = planFieldList(state).filter((f) => f.kind !== "plan" && f.kind !== "both" && at(f.path)?.status === "filled" && at(f.path)?.source !== "csv").map((f) => f.label);
+    // 様式の列より多く頼めた人も、黙って落とさない
+    const helperColumns = Object.values(config.targets ?? {}).filter((t) => /^helper\d\.(?:name|relation)$/.test(t)).map((t) => t.split(".")[0]);
+    askedHelpers(plan, state.people ?? []).slice(new Set(helperColumns).size).forEach((h) => outside.push(`手伝う人（${h.alias}）`));
     $("outsideList").hidden = outside.length === 0;
-    $("outsideList").textContent = `この様式の列には入らない内容があります：${outside.map((f) => f.label).join("、")}`;
+    $("outsideList").textContent = `この様式の列には入らない内容があります：${outside.join("、")}`;
   }
 
   // 渡す前に、空のまま出る欄を見せる
@@ -84,7 +89,9 @@ export function startWrap(state, findings, config) {
     $("inputPanel").hidden = !state.input;
     if (!state.input) return;
     $("inputConsentRows").replaceChildren(...inputConsentGroups(state).map((group) => {
-      const label = GROUP_LABEL[group];
+      // 「その他」だけでは何の同意か分からないので、列の名前を出す
+      const others = Object.entries(state.input.mapping).filter(([, t]) => t.startsWith("extra.")).map(([h]) => h);
+      const label = group === "other" ? `${GROUP_LABEL.other}（${others.join("、")}）` : GROUP_LABEL[group];
       const select = el("select", { ariaLabel: `${label}を介護ソフトへ戻すか` });
       for (const [value, text] of [["unasked", "まだ聞いていない"], ["yes", "戻してよい"], ["no", "戻さない"]]) select.append(el("option", { value, textContent: text }));
       select.value = plan.consentInput[group];
@@ -101,10 +108,11 @@ export function startWrap(state, findings, config) {
     const allowed = hasInputConsent(state);
     $("inputBlocked").hidden = allowed;
     $("inputDownload").disabled = !allowed;
-    const { changes } = buildInputRow({ input: state.input, plan });
-    $("inputChanges").replaceChildren(...(changes.length
+    const { changes, kept } = buildInputRow({ input: state.input, plan });
+    const keptRows = kept.map((header) => el("li", { textContent: `${header}：欄を空にしましたが、元の値のまま戻します` }));
+    $("inputChanges").replaceChildren(...keptRows, ...(changes.length
       ? changes.map((c) => el("li", { textContent: `${c.header}：${c.allowed ? `「${c.to}」に変えます` : `同意がないので元のまま（話では「${c.to}」）`}` }))
-      : [el("li", { className: "hint", textContent: "話で変わった欄はありません。" })]));
+      : keptRows.length ? [] : [el("li", { className: "hint", textContent: "話で変わった欄はありません。" })]));
   }
 
   function renderSheet() {
@@ -121,7 +129,9 @@ export function startWrap(state, findings, config) {
   }
 
   function csvRow() {
-    const today = new Date().toISOString().slice(0, 10);
+    // 朝のうちに前の日にならないよう、手元の日付で作る
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     return buildVillageRow({ ...state, config, createdOn: today });
   }
 
@@ -158,7 +168,7 @@ export function startWrap(state, findings, config) {
   $("print").onclick = () => { renderSheet(); window.print(); };
   $("csvDownload").onclick = () => download(`${config.name ?? "plan"}-plan.csv`, toCsvText(config.columns, csvRow()), "text/csv;charset=utf-8");
   $("inputDownload").onclick = () => download("kaigo-soft-updated.csv", toCsvText(state.input.headers, buildInputRow({ input: state.input, plan }).row), "text/csv;charset=utf-8");
-  $("resumeDownload").onclick = () => download("hinan-hanashi-resume.json", JSON.stringify(toResumeFile(state), null, 2), "application/json");
+  $("resumeDownload").onclick = () => download("hinan-hanashi-resume.json", JSON.stringify(toResumeFile({ ...state, looseMemos: state.looseMemoTexts?.() ?? [] }), null, 2), "application/json");
   $("backToTalk").onclick = () => {
     $("wrap").hidden = true;
     $("talk").hidden = false;

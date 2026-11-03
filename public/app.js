@@ -66,6 +66,10 @@ async function loadVillage() {
 const defaultColumns = (village) => village.columns.map((header) => ({ header, target: DEFAULT_TARGETS[header] ?? "unknown" }));
 
 async function beginTalk(imported, options = {}) {
+  // 二度押しで訪問の画面を二重に動かさない。待っている列の読み取りの答えも捨てる
+  if (state.talkStarted) return;
+  state.talkStarted = true;
+  columnsRequest += 1;
   state.imported = imported;
   try {
     // 様式を選ばずに始めたときは、ハッカ村の様式にする
@@ -74,6 +78,7 @@ async function beginTalk(imported, options = {}) {
       attachOutput(imported, { base: village, columns: defaultColumns(village) });
     }
   } catch {
+    state.talkStarted = false;
     showError($("fileError"), "画面の設定を読めませんでした。もう一度押してください。");
     return;
   }
@@ -96,15 +101,37 @@ function goTo(step) {
 }
 
 function loadBytes(bytes) {
+  // 訪問を始めたあとに遅れて届いた読み込みで、別の人の画面を開かない
+  if (state.talkStarted) return;
   showError($("fileError"), "");
+  // 待っている答えは、前のファイルのもの
+  columnsRequest += 1;
+  $("send").disabled = false;
+  $("sendState").hidden = true;
+  const refuse = (message) => {
+    state.table = null;
+    state.masked = null;
+    goTo(1);
+    showError($("fileError"), message);
+  };
   const table = parseCsv(decodeCsv(bytes));
+  if (table.unclosed) {
+    refuse("引用符（\"）が閉じていない値があります。次の行まで1つの値に入ってしまうので、CSV を確かめてください。");
+    return;
+  }
   if (table.headers.length === 0 || table.rows.length === 0) {
-    showError($("fileError"), "見出しとデータのある CSV を選んでください。");
+    refuse("見出しとデータのある CSV を選んでください。");
     return;
   }
   const repeated = duplicateHeaders(table.headers);
   if (repeated.length > 0) {
-    showError($("fileError"), `同じ見出しが2つあります：${repeated.join("、")}。見出しを分けてから選んでください。`);
+    refuse(`同じ見出しが2つあります：${repeated.join("、")}。見出しを分けてから選んでください。`);
+    return;
+  }
+  // 値のカンマで列がずれると、本物の値が別の欄に入る。取り込まずに知らせる
+  const shifted = table.rows.findIndex((r) => r.slice(table.headers.length).some((v) => v.trim() !== ""));
+  if (shifted >= 0) {
+    refuse(`${shifted + 2}行目の列の数が、見出しより多くなっています。値の中のカンマを確かめてください。`);
     return;
   }
   state.table = table;
@@ -115,11 +142,13 @@ function loadBytes(bytes) {
 
 function renderMask() {
   const { payload, suspectHeaders } = state.masked;
-  const leaks = findLeaks(payload, state.table.rows.flat());
+  // 「同居」列の値「同居」のように、見出しの言葉と同じ値は本物の値と見ない
+  const values = state.table.rows.flat().filter((v) => !payload.columns.some((c) => c.header.includes(v.trim())));
+  const leaks = findLeaks(payload, values);
   const blocked = suspectHeaders.length > 0 || leaks.length > 0;
   $("suspect").hidden = !blocked;
   $("suspect").textContent = blocked
-    ? "見出しに、本物の値らしいものがあります。送らずに止めました。CSV の見出しを確かめてください。"
+    ? `見出しに、本物の値らしいものがあります。送らずに止めました。CSV の見出しを確かめてください。${suspectHeaders.length ? `（${suspectHeaders.join("、")}）` : ""}`
     : "";
   $("send").disabled = blocked;
 
@@ -134,7 +163,10 @@ function renderMask() {
   $("payloadRaw").textContent = JSON.stringify(payload, null, 2);
 }
 
+let columnsRequest = 0;
 async function sendColumns() {
+  columnsRequest += 1;
+  const request = columnsRequest;
   showError($("sendError"), "");
   $("send").disabled = true;
   $("sendState").hidden = false;
@@ -145,6 +177,7 @@ async function sendColumns() {
       body: JSON.stringify(state.masked.payload),
     });
     const data = await res.json();
+    if (request !== columnsRequest) return;
     if (!res.ok) throw new Error((data.errors ?? ["読み取れませんでした"]).join(" / "));
     state.results = data.results;
     $("modeNotice").hidden = data.mode !== "mock";
@@ -152,10 +185,12 @@ async function sendColumns() {
     renderConfirm();
     goTo(3);
   } catch (e) {
-    showError($("sendError"), `送れませんでした。${e.message}`);
+    if (request === columnsRequest) showError($("sendError"), `送れませんでした。${e.message}`);
   } finally {
-    $("send").disabled = false;
-    $("sendState").hidden = true;
+    if (request === columnsRequest) {
+      $("send").disabled = false;
+      $("sendState").hidden = true;
+    }
   }
 }
 
@@ -208,12 +243,17 @@ function confirmMapping() {
     mapping[s.dataset.header] = s.value;
   }
   state.imported = importRow({ headers: state.table.headers, row: state.table.rows[Number($("who").value) || 0], mapping });
-  chooseFormat("ハッカ村", null);
+  // 様式を選んだあとで選び直したときは、その様式のままにする
+  chooseFormat(state.formatName ?? "ハッカ村", state.formatHeaders ?? null);
   goTo(4);
 }
 
 // 様式の見出しを、内容と結びつける。ここで人が確かめる
+let formatRequest = 0;
 async function chooseFormat(name, headers) {
+  // 読んでいる間に戻ったり選び直したりしたら、古い答えは使わない
+  formatRequest += 1;
+  const request = formatRequest;
   showError($("formatError"), "");
   $("formatSend").hidden = true;
   $("formatNotice").hidden = true;
@@ -234,33 +274,48 @@ async function chooseFormat(name, headers) {
         body: JSON.stringify({ kind: "output", columns: headers.map((header) => ({ header, withheld: false, samples: [] })) }),
       });
       const data = await res.json();
+      if (request !== formatRequest) return;
       if (!res.ok) throw new Error((data.errors ?? ["読み取れませんでした"]).join(" / "));
       columns = data.results;
       $("formatNotice").hidden = data.mode !== "mock";
       $("formatNotice").textContent = "今は Claude につないでいません。見出しの言葉から作った仮の答えです。";
     }
+    // 別の様式へ移ったら、前の様式の手直しは使わない
+    if (state.formatName !== name) state.formatEdits = {};
     state.formatName = name;
+    state.formatHeaders = headers;
     renderFormat(columns);
     $("formatGo").disabled = false;
   } catch (e) {
+    if (request !== formatRequest) return;
     $("formatTable").replaceChildren();
     showError($("formatError"), `様式を読めませんでした。${e.message}`);
   } finally {
-    choices.forEach((b) => { b.disabled = false; });
-    $("formatState").hidden = true;
+    if (request === formatRequest) {
+      choices.forEach((b) => { b.disabled = false; });
+      $("formatState").hidden = true;
+    }
   }
 }
 
 function renderFormat(columns) {
   const table = $("formatTable");
+  $("formatChosen").textContent = `選んでいる様式：${state.formatName}`;
+  $("formatChosen").hidden = false;
   table.replaceChildren(el("tr", {}, el("th", { textContent: `${state.formatName}の列` }), el("th", { textContent: "入れる内容" })));
   for (const { header, target } of columns) {
     const select = el("select", { ariaLabel: `${header} に入れる内容` });
     select.dataset.header = header;
     for (const [value, label] of Object.entries({ ...OUTPUT_TARGETS, unknown: "分からない（選んでください）" })) select.append(el("option", { value, textContent: label }));
-    select.value = target in OUTPUT_TARGETS ? target : "unknown";
+    // 人が手で直した選択は、様式を読み直しても残す
+    const edited = state.formatEdits?.[header];
+    select.value = edited ?? (target in OUTPUT_TARGETS ? target : "unknown");
     const row = el("tr", { className: select.value === "unknown" ? "unknown" : "" }, el("td", { textContent: header }), el("td", {}, select));
-    select.addEventListener("change", () => row.classList.toggle("unknown", select.value === "unknown"));
+    select.addEventListener("change", () => {
+      row.classList.toggle("unknown", select.value === "unknown");
+      state.formatEdits ??= {};
+      state.formatEdits[header] = select.value;
+    });
     table.append(row);
   }
 }
@@ -281,8 +336,14 @@ async function confirmFormat() {
   });
   // 訪問の途中で変えたときは、話の画面へ戻る
   if (state.backToTalk) {
+    const fromWrap = state.fromWrap;
     state.imported.refreshFormat();
     closeFormat();
+    // 訪問終了の画面から開いたときは、待たずに新しい様式で開き直す。遅れて届いた点検はあとから入る
+    if (fromWrap) {
+      state.imported.skipWrapWait = true;
+      $("goWrap").click();
+    }
     return;
   }
   renderResult(state.imported);
@@ -292,6 +353,7 @@ async function confirmFormat() {
 // 今の様式を開き直す。足した欄は「計画に無い欄」として見せる
 function reopenFormat() {
   const { output, customs = [] } = state.imported;
+  $("formatSend").hidden = true;
   const fromExtra = (target) => (customs.some((c) => c.path === target) ? "new" : target);
   state.formatName = output.name ?? "ハッカ村";
   renderFormat(output.columns.map((header) => ({ header, target: fromExtra(output.targets[header]) })));
@@ -305,6 +367,7 @@ function reopenFormat() {
 // 訪問の途中から様式の画面を開く。話した内容はそのまま
 function openFormat() {
   state.backToTalk = true;
+  state.fromWrap = !$("wrap").hidden;
   reopenFormat();
   $("talk").hidden = true;
   $("wrap").hidden = true;
@@ -315,6 +378,7 @@ function openFormat() {
 
 function closeFormat() {
   state.backToTalk = false;
+  state.fromWrap = false;
   document.querySelector(".top h1").textContent = "訪問";
   document.querySelector(".top p").textContent = "話を聞いて、段取りと次の一歩を決めます。決めるのはご本人です。";
   $("step4").hidden = true;
@@ -359,7 +423,8 @@ function renderWeek(plan, gaps) {
   const items = plan.care.weekly.value?.items ?? [];
   const wrap = $("week");
   if (items.length === 0) {
-    wrap.replaceChildren(el("p", { className: "hint", textContent: "サービスの予定が CSV に無いので、話の中で聞きます。" }));
+    const unread = plan.care.weekly.value?.unread?.length > 0;
+    wrap.replaceChildren(el("p", { className: "hint", textContent: unread ? "サービスの予定を読めなかったので、話の中で聞きます。" : "サービスの予定が CSV に無いので、話の中で聞きます。" }));
     return;
   }
   const days = WEEK.map((d) => {
@@ -405,11 +470,19 @@ $("formatFile").addEventListener("change", async (e) => {
   const file = e.target.files[0];
   e.target.value = "";
   if (!file) return;
-  const { headers } = parseCsv(decodeCsv(new Uint8Array(await file.arrayBuffer())));
+  const { headers, unclosed } = parseCsv(decodeCsv(new Uint8Array(await file.arrayBuffer())));
+  formatRequest += 1;
+  $("formatDefault").disabled = false;
+  $("formatMint").disabled = false;
+  $("formatState").hidden = true;
   $("formatSend").hidden = true;
   $("formatGo").disabled = true;
   $("formatTable").replaceChildren();
   showError($("formatError"), "");
+  if (unclosed) {
+    showError($("formatError"), "引用符（\"）が閉じていない見出しや値があります。CSV を確かめてください。");
+    return;
+  }
   if (headers.length === 0) {
     showError($("formatError"), "見出しのある CSV を選んでください。");
     return;
@@ -431,7 +504,22 @@ $("formatFile").addEventListener("change", async (e) => {
 });
 $("formatGo").addEventListener("click", confirmFormat);
 $("formatBack").addEventListener("click", () => {
-  if (state.backToTalk) closeFormat();
+  // 読んでいる途中の答えは使わない
+  formatRequest += 1;
+  $("formatState").hidden = true;
+  $("formatDefault").disabled = false;
+  $("formatMint").disabled = false;
+  if (state.fromWrap) {
+    // 訪問終了の画面から開いたときは、そこへ戻す
+    state.backToTalk = false;
+    state.fromWrap = false;
+    document.querySelector(".top h1").textContent = "訪問終了";
+    document.querySelector(".top p").textContent = "今日できたことを確かめて、本人の1枚と渡すものを作ります。";
+    $("step4").hidden = true;
+    $("wrap").hidden = false;
+    document.body.classList.add("wide-mode");
+    window.scrollTo(0, 0);
+  } else if (state.backToTalk) closeFormat();
   else goTo(state.table ? 3 : 1);
 });
 $("stepFormat").addEventListener("click", () => {
@@ -441,6 +529,8 @@ $("stepFormat").addEventListener("click", () => {
 $("changeFormat").addEventListener("click", openFormat);
 $("wrapFormat").addEventListener("click", openFormat);
 $("confirm").addEventListener("click", confirmMapping);
+// 確定したあとで選び直したら、確定をやり直す。別の人の計画で始めないため
+for (const id of ["who", "confirmTable"]) $(id).addEventListener("change", () => { if (!$("step4").hidden) goTo(3); });
 $("startTalk").addEventListener("click", () => beginTalk(state.imported));
 
 $("manualForm").append(...MANUAL_FIELDS.map(([key, label]) => el("label", { className: "field-label" }, label, el("input", { className: "plan-input", name: key }))));
@@ -453,7 +543,17 @@ $("manualGo").addEventListener("click", () => {
   const form = new FormData($("manualForm"));
   const headers = MANUAL_FIELDS.map(([key]) => key);
   const mapping = Object.fromEntries(headers.map((h) => [h, h]));
-  beginTalk(importRow({ headers, row: headers.map((h) => String(form.get(h) ?? "")), mapping, source: "human" }));
+  const imported = importRow({ headers, row: headers.map((h) => String(form.get(h) ?? "")), mapping, source: "human" });
+  // 読めない値を黙って空にしない
+  const unreadable = MANUAL_FIELDS.filter(([key]) => key in imported.identity && String(form.get(key) ?? "").trim() && !imported.identity[key]).map(([, label]) => label);
+  const unreadWeek = imported.plan.care.weekly.value?.unread?.length ? ["週のサービス"] : [];
+  if (unreadable.length + unreadWeek.length > 0) {
+    showError($("fileError"), `読み取れない値があります。形を直すか、空にしてください：${[...unreadable, ...unreadWeek].join("、")}`);
+    $("fileError").scrollIntoView({ block: "nearest" });
+    return;
+  }
+  showError($("fileError"), "");
+  beginTalk(imported);
 });
 $("resume").addEventListener("change", async (e) => {
   const file = e.target.files[0];
@@ -462,7 +562,7 @@ $("resume").addEventListener("change", async (e) => {
   try {
     beginTalk(checkResumedFormat(fromResumeFile(JSON.parse(await file.text()))));
   } catch (err) {
-    showError($("fileError"), `読み込めませんでした。${err.message}`);
+    showError($("fileError"), `読み込めませんでした。${err instanceof SyntaxError ? "続き用ファイルの形ではありません。" : err.message}`);
   }
 });
 document.querySelectorAll("[data-quick]").forEach((b) => b.addEventListener("click", async () => {

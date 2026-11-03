@@ -101,6 +101,7 @@
       </div>
       <p id="formatState" class="work-state" role="status" hidden>Claude が様式の見出しを読んでいます。10秒ほどかかります。</p>
       <p id="formatNotice" class="notice" hidden></p>
+      <p id="formatChosen" class="hint" hidden></p>
       <div class="scroll"><table id="formatTable"></table></div>
       <p id="formatError" class="error" role="alert" hidden></p>
       <div class="row">
@@ -172,7 +173,8 @@
               <p class="hint">ここに入れた名前は、声メモで言ってしまっても送る前に呼び名へ置き換えます。入れていない名前は置き換えられません。入れただけでは「頼めた」になりません。頼めたら、計画の「近くの人」で印を付けてください。</p>
               <div class="row">
                 <input id="personName" class="plan-input short" placeholder="名前" aria-label="名前">
-                <input id="personAlias" class="plan-input short" placeholder="呼び名（例：隣の人）" aria-label="呼び名">
+                <datalist id="aliasList"></datalist>
+                <input id="personAlias" list="aliasList" class="plan-input short" placeholder="呼び名（例：隣の人）" aria-label="呼び名">
                 <input id="personPhone" class="plan-input short" placeholder="電話（任意）" aria-label="電話">
                 <button id="addPerson" class="button">入れる</button>
               </div>
@@ -191,6 +193,11 @@
             <div id="moveBar" class="move-bar" role="status" hidden><span id="moveText"></span> <button id="moveCancel" class="button" type="button">やめる</button></div>
             <div id="planFields"></div>
             <div id="planHelpers"></div>
+            <details id="localInfo" class="local-info">
+              <summary>手元の情報（Claude に送りません）</summary>
+              <div id="localFields"></div>
+              <p id="localError" class="error" role="alert" hidden></p>
+            </details>
           </div>
         </div>
       </div>
@@ -228,6 +235,7 @@
         <p class="notice">架空の決まりです。実際の同意の取り方と渡し方は、市の条例と法律の確認が必要です。同意は紙で確かめ、ここには結果だけ記録します。</p>
         <p id="requiredList" class="required-note" hidden></p>
         <h3>項目ごとの同意</h3>
+        <p id="consentAlways" class="hint"></p>
         <p id="consentReset" class="notice" hidden>様式を変えたので、渡す相手が変わりました。同意を聞き直してください。</p>
         <div id="consentRows"></div>
         <p id="csvBlocked" class="hint">同意した項目がないので、市向けの CSV は出ません。本人の1枚はこのまま渡せます。</p>
@@ -237,7 +245,7 @@
           <button id="csvDownload" class="button primary">この様式の CSV を保存</button>
           <button id="resumeDownload" class="button">続き用ファイルを保存</button>
         </div>
-        <p class="hint">続き用ファイルには名前や連絡先が入ります。保存した人の責任で扱ってください。画面を閉じると、この画面の内容は消えます。</p>
+        <p class="hint">続き用ファイルには名前や連絡先、体のこと、欄に入らなかった声メモの文字が入ります。保存した人の責任で扱ってください。画面を閉じると、この画面の内容は消えます。</p>
         <p id="outsideList" class="notice" hidden></p>
       </div>
 

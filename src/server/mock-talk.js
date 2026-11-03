@@ -22,7 +22,7 @@ export function mockScribe(memo) {
   if (/隣/.test(memo)) {
     updates.push({
       path: "helpers.add",
-      value: { alias: "隣の人", awayWeekdayDaytime: /平日の昼.*(村の外|いない|仕事)/.test(memo), asked: !/頼んでいない/.test(memo) },
+      value: { alias: "隣の人", awayWeekdayDaytime: /平日の昼.*(村の外|いない|仕事)/.test(memo), asked: false },
     });
   }
   if (/固定電話/.test(memo)) set("contactMeans", /だけ|のみ/.test(memo) ? "固定電話のみ" : "固定電話");

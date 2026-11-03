@@ -1,5 +1,5 @@
 // 訪問の画面。声メモは送る前に伏せ、送る中身をそのまま見せる
-import { applyUpdates, editField, fieldsBefore, moveField, placedFields, planForClaude, serviceGaps } from "/core/plan.js";
+import { applyUpdates, editField, fieldsBefore, moveField, placedFields, planForClaude, serviceGaps, setIdentity } from "/core/plan.js";
 import { blankColumns, planFieldList, requiredBlanks } from "/core/format.js";
 import { parseMinutes } from "/core/normalize.js";
 import { findLeaks, redact, redactDeep } from "/core/redact.js";
@@ -22,6 +22,8 @@ const getAt = (obj, path) => path.split(".").reduce((o, k) => o[k], obj);
 const WAIT_LIMIT = 90_000; // 電波の弱い家でも待ち続けない
 const WRAP_WAIT = 20_000;
 const MAX_MEMO = 1000;
+// CSV の値でも、場所や介護の言葉は話に出てよい
+const COMMON_PART = /公民館|集会所|小学校|中学校|体育館|避難所|公園|神社|センター|会館|広場|高台|トイレ|デイサービス|車いす|車椅子|歩行器|補聴器|自動車|トラック|タクシー|ヘルパー|娘|息子|嫁|孫|あり|なし/;
 
 async function post(url, body) {
   let res;
@@ -68,6 +70,7 @@ export function startTalk(state, { script = null } = {}) {
   const changeBoxes = new Map();
   // 様式を変えて欄を作り直すとき、開いている箱を出し直すための控え
   const changeRetry = new Map();
+  const changeQueue = new Map();
   const placedNotes = new Map();
   const scribeQueue = createQueue();
   const checker = createLatest(runCheck);
@@ -77,6 +80,7 @@ export function startTalk(state, { script = null } = {}) {
     { value: identity["self.name"], alias: "本人" },
     { value: identity["self.kana"], alias: "本人" },
     { value: identity["self.address"], alias: "自宅", kind: "address" },
+    { value: identity["self.birth"], alias: "[日付]", kind: "birth" },
     { value: identity["emergency.name"], alias: "緊急連絡先" },
     { value: identity["self.phone"], alias: "[電話番号]", kind: "phone" },
     { value: identity["emergency.phone"], alias: "[電話番号]", kind: "phone" },
@@ -92,12 +96,38 @@ export function startTalk(state, { script = null } = {}) {
     }
   }
 
-  // CSV の「計画に無い欄」の値も、手元にある値として声メモや手直しから伏せる。短い値はふつうの言葉と重なるので除く
+  // CSV の「計画に無い欄」の値も、手元にある値として声メモから伏せる。「佐藤内科(佐藤一郎)」は分けて探す
+  // 短い部分はふつうの言葉と重なるので除く。中身が分からない値なので、一致しても送信は止めない
   for (const f of Object.values(plan.extra ?? {})) {
-    if (f.source !== "csv" || typeof f.value !== "string" || f.value.trim().length < 3) continue;
-    known.unshift({ value: f.value, alias: "[手元の値]" });
-    secrets.push(f.value);
+    if (f.source !== "csv" || typeof f.value !== "string") continue;
+    const parts = f.value.split(/[\s　()（）、,，/／・:：]+/);
+    for (const part of new Set([f.value.trim(), f.value.replace(/\s/g, ""), ...parts])) {
+      if (part.length >= 3 && !COMMON_PART.test(part)) known.unshift({ value: part, alias: "[手元の値]", kind: "whole" });
+    }
   }
+
+  // 手元の情報を直す。名前や番号が増えたら、声メモからも伏せる
+  const localErrors = new Set();
+  const LOCAL_FIELDS = [["self.name", "氏名", { alias: "本人" }], ["self.kana", "ふりがな", { alias: "本人" }], ["self.birth", "生年月日", { alias: "[日付]", kind: "birth" }], ["self.gender", "性別", null], ["self.postal", "郵便番号", { alias: "[郵便番号]" }], ["self.address", "住所", { alias: "自宅", kind: "address" }], ["self.phone", "本人の電話", { alias: "[電話番号]", kind: "phone" }], ["emergency.name", "緊急連絡先の氏名", { alias: "緊急連絡先" }], ["emergency.phone", "緊急連絡先の電話", { alias: "[電話番号]", kind: "phone" }]];
+  $("localFields").replaceChildren(...LOCAL_FIELDS.map(([key, label, guard]) => {
+    const input = el("input", { className: "plan-input", value: identity[key] ?? "", ariaLabel: label, autocomplete: "off" });
+    input.addEventListener("change", () => {
+      const typed = input.value.trim();
+      const value = setIdentity(identity, key, typed);
+      // 読めない値では元の値を消さない。直すまで案内を残す
+      if (value === null) localErrors.add(label);
+      else localErrors.delete(label);
+      $("localError").hidden = localErrors.size === 0;
+      $("localError").textContent = `読み取れませんでした。形を確かめてください（元の値のままです）：${[...localErrors].join("、")}`;
+      input.value = value ?? typed;
+      if (value && guard) {
+        known.unshift({ value, ...guard });
+        secrets.push(guard.kind === "address" ? { value, kind: "address" } : value);
+      }
+      renderAll();
+    });
+    return el("label", { className: "field-label" }, label, input);
+  }));
 
   $("talk").hidden = false;
   renderAll();
@@ -167,7 +197,7 @@ export function startTalk(state, { script = null } = {}) {
       const here = items.filter((i) => i.days.includes(d));
       const isGap = gaps?.includes(d);
       // 話に出た曜日は、聞けたと分かるようにする
-      const heard = isGap && [plan.home.aloneHours.value, plan.timeBands.value].some((v) => String(v ?? "").includes(d));
+      const heard = isGap && [plan.home.aloneHours.value, plan.timeBands.value].some((v) => new RegExp(`(?<!\\p{Script=Han})${d}(?:曜|[・、,と]|の昼|は)|[・、,と]${d}`, "u").test(String(v ?? "")));
       const text = here.length ? here.map((i) => `${i.kind} ${i.start}〜${i.end}`).join(" ") : heard ? "話に出ました" : isGap ? "昼はどなたが？" : "サービスなし";
       return el("div", { className: `day ${here.length ? "covered" : isGap && !heard ? "gap" : ""}` }, el("b", { textContent: d }), text);
     });
@@ -217,9 +247,39 @@ export function startTalk(state, { script = null } = {}) {
     planRows.get(to).input.focus();
   }
 
-  // 値のある欄を変えるときは、その欄のすぐ下で確かめる。提案はその場で直せる。1つの欄に箱は1つ
-  function askChange(path, current, proposed, apply, { focus = false } = {}) {
+  // 箱の中に、あと何件の案が待っているかを出す
+  function showWaiting(path) {
+    const why = changeBoxes.get(path)?.querySelector(".why");
+    const waiting = changeQueue.get(path) ?? [];
+    if (!why) return;
+    why.hidden = waiting.length === 0;
+    why.textContent = waiting.length === 0 ? "" : `別の案があと${waiting.length}件あります（${waiting.map((w) => `「${w.proposed}」`).join("、")}）。この箱を閉じると出ます。`;
+  }
+
+  // 箱を閉じて、待っている次の案を出す。今の内容と同じ案は聞かない
+  function closeChange(path) {
     changeBoxes.get(path)?.remove();
+    changeBoxes.delete(path);
+    renderPlan();
+    const waiting = changeQueue.get(path) ?? [];
+    let next = waiting.shift();
+    while (next && next.proposed === getAt(plan, path).value) next = waiting.shift();
+    if (!next) return;
+    askChange(path, getAt(plan, path).value, next.proposed, next.apply, { owner: next.owner });
+    showWaiting(path);
+  }
+
+  // 値のある欄を変えるときは、その欄のすぐ下で確かめる。提案はその場で直せる。1つの欄に箱は1つ
+  function askChange(path, current, proposed, apply, { focus = false, owner = null, edited = false } = {}) {
+    const open = changeBoxes.get(path);
+    // 開いている箱は消さない。次の案は、この箱を閉じたあとに出す
+    if (open) {
+      if (!changeQueue.has(path)) changeQueue.set(path, []);
+      const same = open.querySelector("input").value === proposed || changeQueue.get(path).some((w) => w.proposed === proposed);
+      if (!same) changeQueue.get(path).push({ proposed, apply, owner });
+      showWaiting(path);
+      return;
+    }
     const label = LABEL.get(path) ?? path;
     let shown = current;
     const nowText = () => `${label}：今は「${shown ?? "未決定"}」`;
@@ -228,17 +288,26 @@ export function startTalk(state, { script = null } = {}) {
     const why = el("p", { className: "why", hidden: true });
     const yes = el("button", { className: "button primary", type: "button", textContent: "この内容に変える" });
     const no = el("button", { className: "button", type: "button", textContent: "今のままにする" });
-    const box = el("div", { className: "notice change-box" }, now, el("label", { className: "field-label" }, "変更後（直せます）", input), el("div", { className: "row" }, yes, no), why);
+    // 置き換えると前の話が消えるので、足す形も選べるようにする
+    const add = el("button", { className: "button", type: "button", textContent: "今の内容に足す" });
+    add.hidden = !shown || path.endsWith("Minutes");
+    add.addEventListener("click", () => {
+      const now = getAt(plan, path).value;
+      if (now) input.value = `${now}、${input.value}`;
+      box.edited = true;
+      add.hidden = true;
+      input.focus();
+    });
+    const box = el("div", { className: "notice change-box" }, now, el("label", { className: "field-label" }, "変更後（直せます）", input), el("div", { className: "row" }, yes, add, no), why);
     const say = (message) => {
       why.textContent = message;
       why.hidden = false;
     };
     const close = () => {
-      box.remove();
-      if (changeBoxes.get(path) === box) changeBoxes.delete(path);
-      renderPlan();
+      closeChange(path);
       planRows.get(path).input.focus();
     };
+    input.addEventListener("input", () => { box.edited = true; });
     no.addEventListener("click", close);
     yes.addEventListener("click", () => {
       const value = input.value.trim();
@@ -260,9 +329,14 @@ export function startTalk(state, { script = null } = {}) {
     });
     planRows.get(path).row.after(box);
     changeBoxes.set(path, box);
-    changeRetry.set(path, () => ({ path, proposed: input.value, apply }));
+    box.owner = owner;
+    box.edited = edited;
+    changeRetry.set(path, () => ({ path, proposed: input.value, apply, owner, edited: box.edited }));
     renderPlan();
-    if (focus) input.focus();
+    if (focus) {
+      input.focus();
+      box.scrollIntoView({ block: "nearest" });
+    }
   }
 
   // 欄もボタンも作り直さず中身だけ変える。作り直すと、Tab で移った先や、押している途中のボタンが消える
@@ -347,6 +421,7 @@ export function startTalk(state, { script = null } = {}) {
   // 残りを一覧で見せる。押すとその欄へ移る
   function renderStatus({ fields, local, helper }) {
     const goTo = (target) => {
+      if (target.row?.tagName === "DETAILS") target.row.open = true;
       target.row?.scrollIntoView({ block: "center" });
       target.focus?.focus();
     };
@@ -358,13 +433,18 @@ export function startTalk(state, { script = null } = {}) {
     const confirms = [...changeBoxes].map(([path, box]) => chip(`確認：${LABEL.get(path) ?? path}`, "confirm", { row: planRows.get(path).row, focus: box.querySelector("input") }));
     const blanks = [...fields.keys()].map((path) => chip(LABEL.get(path) ?? path, "", { row: planRows.get(path).row, focus: planRows.get(path).input }));
     if (helper) blanks.push(chip(`${helper}（頼めた人）`, "", { row: $("planHelpers"), focus: null }));
+    const looseMemos = [...$("memos").querySelectorAll(".loose")];
+    const memoChip = looseMemos.length ? [chip(`入らなかった声メモ ${looseMemos.length}件`, "confirm", { row: looseMemos[0], focus: null })] : [];
     const mustCount = blanks.length;
     const count = mustCount + confirms.length === 0
       ? el("p", { className: "count done", textContent: "必須の欄はすべて入りました。確認もありません" })
       : el("p", { className: "count", textContent: `残り：必須 ${mustCount}件／確認 ${confirms.length}件` });
-    const notes = local.map((name) => el("span", { className: "chip plain", textContent: `${name}（手元の情報）` }));
+    // 頼めた人の名前の入れ場所は、手元の情報ではなく「話に出た人の名前」
+    const notes = local.map((name) => (state.output?.targets?.[name]?.startsWith("helper")
+      ? chip(`${name}（名前を入れる）`, "plain", { row: $("personName").closest("details"), focus: $("personName") })
+      : chip(`${name}（手元の情報）`, "plain", { row: $("localInfo"), focus: null })));
     $("planStatus").hidden = Boolean(moving || placing);
-    $("planStatus").replaceChildren(count, el("div", { className: "chips" }, ...confirms, ...blanks, ...notes));
+    $("planStatus").replaceChildren(count, el("div", { className: "chips" }, ...memoChip, ...confirms, ...blanks, ...notes));
   }
 
   function renderPeople() {
@@ -425,6 +505,7 @@ export function startTalk(state, { script = null } = {}) {
           el("span", {}, f.request, el("small", { textContent: REQUEST_NOTE })));
         box.addEventListener("change", () => {
           plan.requests = box.checked ? [...plan.requests, f.request] : plan.requests.filter((r) => r !== f.request);
+          if (!box.checked) plan.requestsDone = plan.requestsDone.filter((r) => r !== f.request);
           renderRequests();
         });
         return label;
@@ -438,6 +519,8 @@ export function startTalk(state, { script = null } = {}) {
   }
 
   function renderAll() {
+    // 呼び名は計画にいる人から選べるようにする。打ち間違えると、同じ人が2行に分かれて名前が CSV に届かない
+    $("aliasList").replaceChildren(...plan.helpers.map((h) => el("option", { value: h.alias })));
     renderOpener();
     renderWeek();
     renderPlan();
@@ -476,7 +559,9 @@ export function startTalk(state, { script = null } = {}) {
     // 書き取りが残っているときの答えは、すぐ古くなるので使わない
     const outdated = () => isStale() || pendingMemos > 0;
     checking = true;
+    state.checking = true;
     renderWork();
+    state.refreshWrap?.();
     renderRequests();
     try {
       const body = guarded({ plan: planToSend(), gaps, blanks: blankColumns(state.output, plan), fields: extraFields() });
@@ -487,7 +572,9 @@ export function startTalk(state, { script = null } = {}) {
       findings = data.findings;
       checkError = "";
       // 話を始める前に割り込まない。最初の一言は話のきっかけから入る
-      interrupt = memoCount > 0 ? findings.find((f) => f.interrupt && !shownInterrupts.has(f.id)) ?? null : null;
+      // 出ている問いかけは、関係ない操作で消さない
+      const still = interrupt && findings.find((f) => f.id === interrupt.id);
+      interrupt = still ?? (memoCount > 0 ? findings.find((f) => f.interrupt && !shownInterrupts.has(f.id)) ?? null : null);
       if (interrupt) shownInterrupts.add(interrupt.id);
     } catch (e) {
       if (outdated()) return;
@@ -495,7 +582,11 @@ export function startTalk(state, { script = null } = {}) {
       checkError = `点検できませんでした。${e.message}`;
     } finally {
       checking = false;
+      state.checking = false;
       renderWork();
+      // 訪問終了の画面を開いたあとに届いた点検も、次の一歩に入れる
+      state.checkFailed = Boolean(checkError);
+      state.refreshWrap?.();
     }
     renderOpener();
     renderRequests();
@@ -535,8 +626,11 @@ export function startTalk(state, { script = null } = {}) {
         const data = await post("/api/scribe", body);
         markMode(data.mode);
         memoCount += 1;
+        $("memoError").hidden = true;
         const before = fieldsBefore(plan, data.updates);
         const conflicts = applyUpdates(plan, data.updates, memoCount, { late });
+        // 答えを待つ間に様式を変えると、行のない欄へ入ることがある。隠さず行を作る
+        if (data.updates.some((u) => u.path.startsWith("extra.") && !LABEL.has(u.path))) state.refreshFormat();
         askConflicts(conflicts);
         // 移している途中でも、話は続くので操作は止めない。前の欄もあとから移せるよう足していく
         const placedNow = placedFields(plan, before, memoCount);
@@ -558,7 +652,7 @@ export function startTalk(state, { script = null } = {}) {
           for (const path of placedNow.keys()) placedNotes.set(path, note);
         }
         if (conflicts.length > 0) item.append(el("small", { className: "placed", textContent: `→ ${conflicts.map((c) => LABEL.get(c.path) ?? c.path).join("、")}：今の内容と違うので、確認が出ています` }));
-        if (names.length === 0 && conflicts.length === 0 && !data.updates.some((u) => u.path.endsWith(".noOthers"))) makeLoose(item, memo);
+        if (data.updates.length === 0) makeLoose(item, memo);
         if (data.dropped > 0) item.append(el("small", { className: "hint", textContent: ` 一部は根拠を確かめられず、計画に入れていません。欄を確かめてください。` }));
         interrupt = null;
       } catch (e) {
@@ -591,6 +685,7 @@ export function startTalk(state, { script = null } = {}) {
     note.append(button);
     item.append(note);
     item.classList.add("loose");
+    item.scrollIntoView({ block: "nearest" });
     item.draggable = true;
     button.addEventListener("click", () => {
       moving = null;
@@ -611,11 +706,28 @@ export function startTalk(state, { script = null } = {}) {
     });
   }
 
-  function placeMemo(path, { item, memo, note, button }) {
+  function placeMemo(path, loose) {
+    const { item, memo, note, button } = loose;
+    if (loose.placed) return;
+    if (placing === loose) {
+      placing = null;
+      renderAll();
+    }
+    // 1つの声メモの確認は1つだけ。入れ直したら、前の案を取り下げる。ほかの話の箱には触らない
+    const own = [...changeBoxes.values()].find((box) => box.owner === loose);
+    // 箱で直していた文字は、次の欄へ引き継ぐ
+    const typed = own?.edited ? own.querySelector("input").value : null;
+    for (const [p, waiting] of changeQueue) {
+      changeQueue.set(p, waiting.filter((w) => w.owner !== loose));
+      showWaiting(p);
+    }
+    for (const [p, box] of [...changeBoxes]) if (box.owner === loose) closeChange(p);
     const label = LABEL.get(path) ?? path;
     const f = getAt(plan, path);
     const put = (value) => {
+      if (loose.placed) return "この声メモは、もう別の欄へ入れました。今のままにしてください。";
       if (path.endsWith("Minutes") && parseMinutes(value) === null) return `「${value}」は時間として読めません。数字で入れてください。`;
+      loose.placed = true;
       const previous = { ...f };
       editField(plan, path, value);
       fresh.set(path, previous);
@@ -627,10 +739,11 @@ export function startTalk(state, { script = null } = {}) {
       placedNotes.set(path, note);
       renderAll();
       refreshFindings();
+      planRows.get(path).input.focus();
       return null;
     };
     // 値がある欄、時間の欄、置き換えの記号が残る文は、その場で直してから入れる
-    if (f.status === "filled" || path.endsWith("Minutes") || /\[(?:お名前|住所|日付|電話番号|郵便番号)\]/.test(memo)) askChange(path, f.value, memo, put, { focus: true });
+    if (f.status === "filled" || path.endsWith("Minutes") || changeBoxes.has(path) || typed !== null || /\[(?:お名前|住所|日付|電話番号|郵便番号|手元の値|メール)\]/.test(memo)) askChange(path, f.value, typed ?? memo, put, { focus: true, owner: loose, edited: typed !== null });
     else put(memo);
   }
 
@@ -664,7 +777,12 @@ export function startTalk(state, { script = null } = {}) {
     const name = $("personName").value.trim();
     const alias = $("personAlias").value.trim();
     const phone = $("personPhone").value.replace(/\D/g, "");
-    if (!name || !alias) return;
+    if (!name || !alias) {
+      $("memoError").textContent = "名前と呼び名の両方を入れてください。呼び名は「隣の人」のように、続き柄や位置で入れます。";
+      $("memoError").hidden = false;
+      return;
+    }
+    $("memoError").hidden = true;
     if (findLeaks(alias, [name]).length > 0) {
       $("memoError").textContent = "呼び名に名前が入っています。「隣の人」のように続き柄や位置で入れてください。";
       $("memoError").hidden = false;
@@ -703,11 +821,19 @@ export function startTalk(state, { script = null } = {}) {
       if (checkError) await checker.request().catch(() => {});
     })();
     // 待ち続けない。残りは訪問終了の画面で知らせる
-    await Promise.race([work, new Promise((resolve) => setTimeout(resolve, WRAP_WAIT))]);
+    const label = $("goWrap").textContent;
+    if (state.skipWrapWait) state.skipWrapWait = false;
+    else {
+      $("goWrap").textContent = "点検の終わりを待っています";
+      await Promise.race([work, new Promise((resolve) => setTimeout(resolve, WRAP_WAIT))]);
+    }
+    $("goWrap").textContent = label;
     $("goWrap").disabled = false;
+    if ($("talk").hidden) return;
     state.checkFailed = Boolean(checkError);
     // 復唱して、計画に入れ忘れた文字も数える
-    state.unfinishedMemos = () => $("memos").querySelectorAll(".pending, .failed").length + ($("memo").value.trim() ? 1 : 0);
+    state.unfinishedMemos = () => state.looseMemoTexts().length + ($("memo").value.trim() ? 1 : 0);
+    state.findings = () => findings;
     startWrap(state, findings, state.output);
   });
   $("skip").addEventListener("click", () => {
@@ -721,7 +847,7 @@ export function startTalk(state, { script = null } = {}) {
     if (topic) {
       skipped.push(topic.id);
       topic.fills.forEach((p) => skippedFields.add(p));
-      plan.nextSteps.push({ topic: topic.id, text: topic.text });
+      plan.nextSteps.push({ topic: topic.id, text: topic.text, fills: topic.fills });
     }
     renderOpener();
   });
@@ -742,11 +868,38 @@ export function startTalk(state, { script = null } = {}) {
     planRows.clear();
     $("planFields").replaceChildren();
     renderAll();
-    for (const { path, proposed, apply } of open) askChange(path, getAt(plan, path).value, proposed, apply);
+    for (const { path, proposed, apply, owner, edited } of open) {
+      askChange(path, getAt(plan, path).value, proposed, apply, { owner, edited });
+      showWaiting(path);
+    }
+    const notes = new Map();
+    for (const [path, note] of placedNotes) notes.set(note, [...(notes.get(note) ?? []), LABEL.get(path) ?? path]);
+    for (const [note, names] of notes) if (!note.textContent.includes("近くの人")) note.textContent = `→ ${names.join("、")}に入りました`;
     refreshFindings();
   };
 
+  // 計画に入っていない声メモは、続き用ファイルに残し、再開したら戻す
+  state.looseMemoTexts = () => {
+    const typed = new Map([...changeBoxes.values()].filter((box) => box.owner && box.edited).map((box) => [box.owner.memo, box.querySelector("input").value]));
+    return [...new Set([
+      ...[...$("memos").querySelectorAll(".pending, .failed, .loose")].map((li) => typed.get(li.firstChild.textContent) ?? li.firstChild.textContent),
+      ...[...changeBoxes.values()].filter((box) => !box.owner).map((box) => box.querySelector("input").value),
+      ...[...changeQueue.values()].flat().filter((w) => !w.owner).map((w) => w.proposed),
+    ])];
+  };
+  for (const memo of state.looseMemos ?? []) {
+    const item = el("li", { textContent: memo });
+    $("memos").append(item);
+    makeLoose(item, memo);
+  }
+  renderAll();
+
   micTalk = startMic(addMemo);
+  // 話した内容はこの画面の中だけにある。閉じる前に確かめる
+  window.addEventListener("beforeunload", (e) => {
+    e.preventDefault();
+    e.returnValue = "";
+  });
 }
 
 const MIC_LABEL = "長押しで復唱／短く押して計画に入れる";
@@ -879,7 +1032,7 @@ function startMicKey(talk, press) {
     if (!e.repeat) press();
   }, true);
   window.addEventListener("keyup", (e) => {
-    if ($("talk").hidden || keyCode(e) !== bound) return;
+    if (keyCode(e) !== bound) return;
     talk.release();
   }, true);
   // 押したまま別の窓へ移ると、離したことが届かない

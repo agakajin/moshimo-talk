@@ -156,7 +156,7 @@ test("公開デモでは、サーバーでもサンプル以外の列を断り�
   const send = (columns) => fetch(`${base}/api/read-columns`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ columns }) });
   assert.equal((await send([{ header: "利用者名", withheld: false, samples: ["文字列1"] }])).status, 200);
   assert.equal((await send([{ header: "本物の台帳の列", withheld: false, samples: ["文字列1"] }])).status, 422);
-  const long = await fetch(`${base}/api/scribe`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ memo: "あ".repeat(1001), plan: {} }) });
+  const long = await fetch(`${base}/api/scribe`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ memo: "あ".repeat(3001), plan: {} }) });
   assert.equal(long.status, 422);
 });
 

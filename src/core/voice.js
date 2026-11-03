@@ -10,7 +10,8 @@ const FINISH_MS = 5000;
 export const DEFAULT_KEY = "F2";
 const FUNCTION_KEY = /^F\d+$/;
 // 画面の移動やボタンの操作に使うキーは、録音に当てない
-const canBind = (code) => Boolean(code) && !["Tab", "Escape", "Space", "Enter"].includes(code);
+// Ctrl や Alt はブラウザの操作に使うので、録音に割り当てない
+const canBind = (code) => Boolean(code) && !["Tab", "Escape", "Space", "Enter"].includes(code) && !/^(?:Control|Alt|Meta|Shift|OS)/.test(code);
 export const keyCode = (e) => e.code || e.key;
 export const keyLabel = (code) => code.replace(/^Key/, "").replace(/^Digit/, "");
 export const chooseKey = (e) => (canBind(keyCode(e)) ? keyCode(e) : null);

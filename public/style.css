@@ -218,3 +218,10 @@ td.waiting { background: var(--warn-soft); color: var(--warn); }
   .columns { grid-template-columns: 1fr; }
   .or { margin-left: 0; width: 100%; }
 }
+.plan-status .chips { max-height: 5.5em; overflow-y: auto; }
+.plan-row .name, #formatTable td, #confirmTable td { overflow-wrap: anywhere; }
+#csvPreview td:first-child { min-width: 9em; }
+.local-info { margin-top: 10px; font-size: 14px; }
+.local-info summary { cursor: pointer; color: var(--muted); }
+#localFields { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 10px; margin-top: 6px; }
+button.chip.plain { cursor: pointer; }

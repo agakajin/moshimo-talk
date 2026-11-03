@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { decodeCsv, parseCsv } from "../src/core/csv.js";
 import { attachOutput, blankColumns, buildInputRow, checkResumedFormat, DEFAULT_TARGETS, duplicateHeaders, hasInputConsent, inputConsentGroups, planFieldList, requiredBlanks, suspiciousHeaders } from "../src/core/format.js";
 import { buildVillageRow, hasCityConsent, toCsvText } from "../src/core/output.js";
-import { applyUpdates, createPlan, editField, fromResumeFile, importRow, planForClaude, toResumeFile } from "../src/core/plan.js";
+import { applyUpdates, createPlan, editField, fieldsBefore, fromResumeFile, importRow, placedFields, planForClaude, setIdentity, toResumeFile } from "../src/core/plan.js";
 import { acceptScribe, acceptColumns, summarizePlan } from "../src/server/claude.js";
 import { mockReadColumns } from "../src/server/mock-reader.js";
 import { OUTPUT_READER_TARGETS, scribePrompt, SCRIBE } from "../src/server/prompts.js";
@@ -283,8 +283,10 @@ test("取り込みの「計画に無い欄」の値は Claude へ送らない。
   assert.ok(!sent.includes("1234567890"));
   assert.equal(plan.extra.x1.value, "架空太郎", "手元には残す");
   assert.deepEqual(validateCheckPayload({ plan: planForClaude(plan), gaps: null }), []);
-  editField(plan, "extra.x1", "架空医院へ週1回");
-  assert.ok(JSON.stringify(planForClaude(plan)).includes("架空医院へ週1回"));
+  editField(plan, "extra.x1", "架空太郎医師");
+  assert.ok(!JSON.stringify(planForClaude(plan)).includes("架空太郎"), "手で直しても送らない");
+  plan.extra.x1 = { status: "filled", value: "2階", source: "voice", memoId: 1 };
+  assert.ok(JSON.stringify(planForClaude(plan)).includes("2階"), "話した値は送る");
 });
 
 test("様式の見出しを送る前に調べる：手元の情報、番号、名前、改行", () => {
@@ -302,7 +304,7 @@ test("様式の見出しを送る前に調べる：手元の情報、番号、�
 test("入口の検査をそろえる：あとで書き取りが止まる見出しは、様式を読む段階で止める", () => {
   const read = (header) => validateColumnsPayload({ kind: "output", columns: [{ header, withheld: false, samples: [] }] });
   const plan = createPlan();
-  for (const header of ["利用者様の居住階", "支援者様氏名", "カナ氏名", "緊急連絡先氏名"]) {
+  for (const header of ["利用者様の居住階", "支援者様氏名", "カナ氏名", "緊急連絡先氏名", "避難支援者氏名", "代理人氏名", "配偶者氏名"]) {
     assert.deepEqual(read(header), [], header);
     assert.deepEqual(validateScribePayload({ memo: "2階", plan, fields: [{ key: "extra.x1", label: header }] }), [], header);
   }
@@ -368,4 +370,100 @@ test("別の様式を通って戻っても、前の同意は残らない", () =>
   hakka(imported);
   assert.ok(Object.values(imported.plan.consent).every((v) => v === "unasked"));
   assert.equal(imported.consentReset, true);
+});
+
+test("持ち出しと過ごし方は、暮らしの同意で出す", () => {
+  const imported = okano();
+  const config = attachOutput(imported, { base: VILLAGE, columns: [{ header: "持ち出し", target: "carry" }, { header: "過ごし方", target: "timeBands" }] });
+  applyUpdates(imported.plan, [{ path: "carry", value: "心臓の薬" }, { path: "timeBands", value: "月水金はデイ" }], 1);
+  imported.plan.consent.evacuation = "yes";
+  assert.deepEqual(buildVillageRow({ ...imported, config, createdOn: "x" }), ["", ""]);
+  imported.plan.consent.care = "yes";
+  assert.deepEqual(buildVillageRow({ ...imported, config, createdOn: "x" }), ["心臓の薬", "月水金はデイ"]);
+});
+
+test("準備と移動を別の列にでき、頼めた人の名前が無ければ手元の空きに出る", () => {
+  const imported = okano();
+  const config = attachOutput(imported, { base: VILLAGE, columns: [{ header: "準備", target: "evacuation.prepMinutes" }, { header: "移動", target: "evacuation.moveMinutes" }, { header: "同行者", target: "helper1.name" }] });
+  applyUpdates(imported.plan, [{ path: "evacuation.prepMinutes", value: "10" }, { path: "evacuation.moveMinutes", value: "20" }], 1);
+  imported.plan.consent.evacuation = "yes";
+  assert.deepEqual(buildVillageRow({ ...imported, config, createdOn: "x" }).slice(0, 2), ["10", "20"]);
+  imported.plan.helpers.push({ alias: "隣の人", asked: true });
+  assert.deepEqual(requiredBlanks({ ...imported, people: [] }).local.filter((h) => h === "同行者"), ["同行者"]);
+  assert.deepEqual(requiredBlanks({ ...imported, people: [{ alias: "隣の人", name: "架空 隣" }] }).local.filter((h) => h === "同行者"), []);
+});
+
+test("プログラムの部品と同じ見出しは止める。行末のカンマの空の見出しは数えない", () => {
+  for (const h of ["__proto__", "constructor", "toString"]) {
+    assert.deepEqual(suspiciousHeaders([h]), [h]);
+    assert.deepEqual(maskTable({ headers: [h], rows: [["x"]] }).suspectHeaders, [h]);
+  }
+  assert.deepEqual(parseCsv("氏名,電話,\nあ,い,\n").headers, ["氏名", "電話"]);
+});
+
+test("介護ソフト用：欄を空にしても元の値を残し、そのことを返す", () => {
+  const imported = okano();
+  editField(imported.plan, "care.stairs", "");
+  const { row, kept } = buildInputRow(imported);
+  assert.ok(kept.includes("階段"));
+  assert.equal(row[imported.input.headers.indexOf("階段")], imported.input.row[imported.input.headers.indexOf("階段")]);
+});
+
+test("読めない時間は空きとして見せる", () => {
+  const imported = okano();
+  mint(imported);
+  editField(imported.plan, "evacuation.prepMinutes", "10");
+  editField(imported.plan, "evacuation.moveMinutes", "30分から1時間");
+  assert.ok(requiredBlanks(imported).fields.has("evacuation.moveMinutes"));
+});
+
+test("続き用ファイル：形の違うものを断り、入らなかった声メモを残す", () => {
+  const imported = okano();
+  hakka(imported);
+  const data = JSON.parse(JSON.stringify(toResumeFile({ ...imported, looseMemos: ["あとで入れる話"] })));
+  assert.deepEqual(fromResumeFile(data).looseMemos, ["あとで入れる話"]);
+  const week = JSON.parse(JSON.stringify(data));
+  week.plan.care.weekly.value = "月水金";
+  assert.throws(() => checkResumedFormat(fromResumeFile(week)), /形が正しくありません/);
+  const cols = JSON.parse(JSON.stringify(data));
+  cols.output.columns = "氏名";
+  assert.throws(() => checkResumedFormat(fromResumeFile(cols)), /形が正しくありません/);
+});
+
+test("閉じていない引用符を知らせる", () => {
+  assert.equal(parseCsv('氏名,住所\n架空,"村1\n次郎,村2\n').unclosed, true);
+  assert.equal(parseCsv('氏名,住所\n架空,"村1"\n').unclosed, undefined);
+});
+
+test("閉じ忘れの引用符が2行で対になった値を知らせる", () => {
+  assert.equal(parseCsv('氏名,備考\nA,"娘\nB,"息子\n').unclosed, true);
+  assert.equal(parseCsv('氏名,備考\nA,"1行目\n2行目"\n').unclosed, undefined);
+});
+
+test("手元の情報：読めない値では元の値を消さない", () => {
+  const identity = { "self.birth": "1939-04-12" };
+  assert.equal(setIdentity(identity, "self.birth", "よくわからない"), null);
+  assert.equal(identity["self.birth"], "1939-04-12");
+  assert.equal(setIdentity(identity, "self.birth", ""), "");
+});
+
+test("同じ値の書き取りは、入ったと数えない", () => {
+  const plan = createPlan();
+  applyUpdates(plan, [{ path: "evacuation.place", value: "公民館" }], 1);
+  const before = fieldsBefore(plan, [{ path: "evacuation.place", value: "公民館" }, { path: "evacuation.means", value: "車" }]);
+  applyUpdates(plan, [{ path: "evacuation.place", value: "公民館" }, { path: "evacuation.means", value: "車" }], 2);
+  assert.deepEqual([...placedFields(plan, before, 2).keys()], ["evacuation.means"]);
+});
+
+test("頼めた人が2人でも、名前を入れた人が列に入る。名前のない2人目は空きに出る", () => {
+  const imported = okano();
+  const columns = [{ header: "同行者", target: "helper1.name" }, { header: "同行者電話", target: "helper1.phone" }, { header: "同行者2", target: "helper2.name" }];
+  const config = attachOutput(imported, { base: VILLAGE, columns });
+  imported.plan.helpers.push({ alias: "隣の親子", asked: true }, { alias: "娘さん", asked: true });
+  imported.people = [{ alias: "娘さん", name: "架空 花", phone: "00000000002" }];
+  imported.plan.consent.helper = "yes";
+  const row = buildVillageRow({ ...imported, config, createdOn: "x" });
+  assert.equal(row[0], "架空 花");
+  assert.ok(row[1].replace(/\D/g, "").endsWith("0002"));
+  assert.deepEqual(requiredBlanks(imported).local.filter((h) => h.startsWith("同行者")), ["同行者2"]);
 });

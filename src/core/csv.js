@@ -10,6 +10,7 @@ export function decodeCsv(bytes) {
 
 export function parseCsv(text) {
   const records = [];
+  let doubtful = false;
   let record = [];
   let cell = "";
   let quoted = false;
@@ -17,7 +18,11 @@ export function parseCsv(text) {
     const c = text[i];
     if (quoted) {
       if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; }
-      else if (c === '"') quoted = false;
+      else if (c === '"') {
+        quoted = false;
+        // 閉じ忘れが2行で対になると、2行が1つの値になる。改行とカンマの両方がある値は確かめてもらう
+        if (cell.includes("\n") && cell.includes(",")) doubtful = true;
+      }
       else cell += c;
     } else if (c === '"' && cell === "") quoted = true;
     else if (c === ",") { record.push(cell); cell = ""; }
@@ -29,6 +34,10 @@ export function parseCsv(text) {
   }
   if (cell !== "" || record.length > 0) { record.push(cell); records.push(record); }
   const nonEmpty = records.filter((r) => r.some((v) => v.trim() !== ""));
-  const [headers = [], ...rows] = nonEmpty;
-  return { headers: headers.map((h) => h.trim()), rows };
+  const [first = [], ...rows] = nonEmpty;
+  const headers = first.map((h) => h.trim());
+  // 行末のカンマでできた空の見出しは列に数えない
+  while (headers.length > 0 && headers[headers.length - 1] === "") headers.pop();
+  // 閉じていない引用符は、次の行まで1つの値に吸い込む
+  return quoted || doubtful ? { headers, rows, unclosed: true } : { headers, rows };
 }

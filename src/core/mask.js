@@ -2,8 +2,8 @@
 import { normalizeDate, normalizePhone, normalizePostal, normalizeText, toHalfWidth } from "./normalize.js";
 import { formKind, personalKind } from "./redact.js";
 
-// 見出しに入ると指示文の行に見える文字。読むときに断る
-export const CONTROL = /[\p{Cc}\u2028\u2029]/u;
+// 見出しに入ると指示文の行に見える文字と、プログラムの部品と同じ名前。読むときに断る
+export const CONTROL = /[\p{Cc}\u2028\u2029]|^(?:__proto__|constructor|prototype|toString|valueOf|hasOwnProperty|isPrototypeOf)$/u;
 
 const WITHHELD_HEADER = /備考|メモ|特記|自由記述|コメント/;
 
