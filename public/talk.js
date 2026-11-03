@@ -290,13 +290,31 @@ export function startTalk(state, { script = null } = {}) {
     const no = el("button", { className: "button", type: "button", textContent: "今のままにする" });
     // 置き換えると前の話が消えるので、足す形も選べるようにする
     const add = el("button", { className: "button", type: "button", textContent: "今の内容に足す" });
-    add.hidden = !shown || path.endsWith("Minutes");
+    // 案に今の内容がもう入っているときは、足すと文が重なるので出さない
+    add.hidden = !shown || path.endsWith("Minutes") || proposed.includes(shown);
+    // 足したあとは、同じボタンで足す前に戻せる
+    let beforeAdd = null;
     add.addEventListener("click", () => {
-      const now = getAt(plan, path).value;
-      if (now) input.value = `${now}、${input.value}`;
+      if (beforeAdd !== null) {
+        input.value = beforeAdd;
+        beforeAdd = null;
+        add.textContent = "今の内容に足す";
+      } else {
+        const current = getAt(plan, path).value;
+        if (!current) return;
+        beforeAdd = input.value;
+        input.value = `${current}、${input.value}`;
+        add.textContent = "足す前に戻す";
+      }
       box.edited = true;
-      add.hidden = true;
       input.focus();
+    });
+    // 足したあとに手で直したら、戻すと直した文字が消えるので、ボタンを下げる
+    input.addEventListener("input", () => {
+      if (beforeAdd === null) return;
+      beforeAdd = null;
+      add.textContent = "今の内容に足す";
+      add.hidden = true;
     });
     const box = el("div", { className: "notice change-box" }, now, el("label", { className: "field-label" }, "変更後（直せます）", input), el("div", { className: "row" }, yes, add, no), why);
     const say = (message) => {

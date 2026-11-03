@@ -212,7 +212,7 @@
         <div id="askedList"></div>
         <h2 class="gap-top">次の一歩</h2>
         <ul id="nextList"></ul>
-        <div class="row"><button id="backToTalk" class="button">話に戻る</button><button id="wrapFormat" class="button">様式を変える</button></div>
+        <div class="row"><button id="backToTalk" class="button primary">話に戻る</button><button id="wrapFormat" class="button">様式を変える</button></div>
       </div>
 
       <div class="panel">
@@ -237,6 +237,7 @@
         <h3>項目ごとの同意</h3>
         <p id="consentAlways" class="hint"></p>
         <p id="consentReset" class="notice" hidden>様式を変えたので、渡す相手が変わりました。同意を聞き直してください。</p>
+        <div id="consentAll" class="row consent-all"></div>
         <div id="consentRows"></div>
         <p id="csvBlocked" class="hint">同意した項目がないので、個別避難計画書の CSV は出ません。本人の1枚はこのまま渡せます。</p>
         <p id="csvCheckHint" class="hint">手伝う人の同意がない間は、人の話が入った文を隠します。隠しきれない言い方もあるので、下の内容を読んで確かめてください。</p>
@@ -252,6 +253,7 @@
       <div id="inputPanel" class="panel" hidden>
         <h2>ケアプラン用に書き出す</h2>
         <p class="hint">取り込んだケアプランの CSV と同じ見出しの新しいファイルを作ります。元のファイルは変えません。市に渡す同意とは別に、戻してよいかを確かめて記録します。ケアプランの見出しにある欄だけを戻し、見出しの無い内容は保存しません。介護ソフトに取り込めるかは、ソフトの対応しだいです。文字コードは UTF-8 です。</p>
+        <div id="inputConsentAll" class="row consent-all"></div>
         <div id="inputConsentRows"></div>
         <ul id="inputChanges"></ul>
         <p id="inputBlocked" class="hint">同意した項目がないので、ケアプラン用の CSV は保存しません。</p>

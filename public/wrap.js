@@ -21,6 +21,7 @@ function download(name, text, type) {
 }
 
 const CONSENT_OPTIONS = [["unasked", "まだ聞いていない"], ["yes", "渡してよい"], ["no", "渡さない"]];
+const INPUT_OPTIONS = [["unasked", "まだ聞いていない"], ["yes", "戻してよい"], ["no", "戻さない"]];
 
 export function startWrap(state, findings, config) {
   const { plan } = state;
@@ -49,7 +50,24 @@ export function startWrap(state, findings, config) {
     }));
   }
 
+  // 同意をまとめて変える。項目ごとの欄と同じ値を入れるだけなので、あとから1つずつ直せる
+  function renderBulk(id, options, groups, store, after) {
+    $(id).replaceChildren(el("span", { className: "hint", textContent: "まとめて変える：" }), ...options.map(([value, label]) => {
+      const button = el("button", { className: "button mini", type: "button", textContent: label });
+      button.addEventListener("click", () => {
+        for (const group of groups) store[group] = value;
+        after();
+      });
+      return button;
+    }));
+  }
+
   function renderConsent() {
+    renderBulk("consentAll", CONSENT_OPTIONS, Object.keys(config.consentGroups), plan.consent, () => {
+      state.consentReset = false;
+      renderConsent();
+      renderCsvPreview();
+    });
     $("consentAlways").textContent = config.alwaysColumns?.length ? `同意が1つでもあれば、次の列は本人を確かめるために一緒に出ます：${config.alwaysColumns.join("、")}` : "";
     $("consentReset").hidden = !state.consentReset;
     $("consentRows").replaceChildren(...Object.entries(config.consentGroups).map(([group, def]) => {
@@ -88,12 +106,13 @@ export function startWrap(state, findings, config) {
   function renderInput() {
     $("inputPanel").hidden = !state.input;
     if (!state.input) return;
+    renderBulk("inputConsentAll", INPUT_OPTIONS, inputConsentGroups(state), plan.consentInput, renderInput);
     $("inputConsentRows").replaceChildren(...inputConsentGroups(state).map((group) => {
       // 「その他」だけでは何の同意か分からないので、列の名前を出す
       const others = Object.entries(state.input.mapping).filter(([, t]) => t.startsWith("extra.")).map(([h]) => h);
       const label = group === "other" ? `${GROUP_LABEL.other}（${others.join("、")}）` : GROUP_LABEL[group];
       const select = el("select", { ariaLabel: `${label}をケアプランへ戻すか` });
-      for (const [value, text] of [["unasked", "まだ聞いていない"], ["yes", "戻してよい"], ["no", "戻さない"]]) select.append(el("option", { value, textContent: text }));
+      for (const [value, text] of INPUT_OPTIONS) select.append(el("option", { value, textContent: text }));
       select.value = plan.consentInput[group];
       select.addEventListener("change", () => {
         plan.consentInput[group] = select.value;
