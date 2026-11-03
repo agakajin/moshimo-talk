@@ -97,7 +97,7 @@ function variants(value) {
   const add = (part) => { if (longEnough(part)) out.add(part); };
   // 空白のない氏名は、名字だけ、名前だけでも探す
   for (const part of text.split(" ")) if (text.includes(" ") && /^[ァ-ヶー]{2,}$/.test(part)) out.add(part);
-  const kanaGiven = /^([\p{Script=Han}々]+)([ぁ-ゖァ-ヶー]+)$/u.exec(text);
+  const kanaGiven = /^([\p{Script=Han}々]+)([ぁ-ゖァ-ヶー]+[\p{Script=Han}々]?)$/u.exec(text);
   if (kanaGiven) {
     add(kanaGiven[1]);
     add(kanaGiven[2]);
@@ -298,7 +298,7 @@ const NAMED = /(?<=名前は)[\p{Script=Han}々ァ-ヶー]{2,8}|[\p{Script=Han}�
 const NAMED_HOME = /[\p{Script=Han}々]{1,4}宅/gu;
 // 「認知症の奥さん」「同居の息子」は伏せない。よくある名字のあとだけ名前と見る（珍しい名字は敬称や手元の値で探す）
 const COMMON_SURNAME = new Set("佐藤 鈴木 高橋 田中 伊藤 渡辺 山本 中村 小林 加藤 吉田 山田 佐々木 山口 松本 井上 木村 斎藤 清水 山崎 池田 橋本 阿部 石川 山下 中島 石井 小川 前田 岡田 長谷川 藤田 後藤 近藤 村上 遠藤 青木 坂本 福田 太田 西村 藤井 金子 岡本 藤原 中野 三浦 原田 中川 松田 竹内 小野 田村 中山 和田 石田 森田 上田 内田 柴田 酒井 横山 高木 安藤 宮本 大野 小島 谷口 今井 工藤 高田 増田 丸山 杉山 村田 大塚 新井 小山 平野 藤本 河野 上野 野口 武田 松井 岩崎 菅原 木下 久保 佐野 野村 松尾 市川 菊地 杉本 古川 大西 島田 水野 桜井 高野 渡部 吉川 山内 西田 菊池 飯田 西川 小松 北村 安田 五十嵐 川口 平田 中田 久保田 服部 岩田 土屋 川崎 本田".split(" "));
-const NAMED_FAMILY = /(?<![\p{Script=Han}々])[\p{Script=Han}々]{2,4}(?=の(?:奥さん|おばあちゃん|おばあさん|おじいちゃん|おじいさん|おばちゃん|おじちゃん|ばあちゃん|じいちゃん|爺さん|婆さん|息子|娘|兄ちゃん|姉ちゃん))/gu;
+const NAMED_FAMILY = /(?<![\p{Script=Han}々])[\p{Script=Han}々]{2,4}(?=の(?:奥さん|おばあちゃん|おばあさん|おじいちゃん|おじいさん|おばちゃん|おじちゃん|ばあちゃん|じいちゃん|ばあさん|じいさん|おばさん|おじさん|爺さん|婆さん|息子|娘|兄ちゃん|姉ちゃん|お嫁さん|嫁|婿|お孫さん|孫|旦那|ご主人|長男|次男|三男|長女|次女|三女|お母さん|お父さん|母|父|兄|姉|弟|妹|家|ところ|車))/gu;
 const maskNames = (text) => text.replace(NAME, (word, at) => (isName(word) && !isOrdinary(word, text.slice(at + word.length)) ? "[お名前]" : word))
   .replace(NAMED, (w) => (isName(w) && !PLACE_END.test(w) ? "[お名前]" : w))
   .replace(NAMED_HOME, (w) => (namedHome(w) ? "[お名前]宅" : w))

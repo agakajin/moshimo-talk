@@ -217,7 +217,7 @@ export function checkResumedFormat(imported) {
   return imported;
 }
 
-const MARK = { both: "両方", plan: "避難計画のみ", care: "介護ソフトのみ" };
+const MARK = { both: "両方", plan: "避難計画書のみ", care: "ケアプランのみ" };
 const ON_SHEET = new Set(["evacuation.place", "evacuation.means", "evacuation.prepMinutes", "evacuation.moveMinutes", "carry"]);
 
 // 聞く欄の一覧。出口の見出しを名前にし、避難計画に入る欄を先に並べる
@@ -302,7 +302,7 @@ export function inputConsentGroups({ input, plan }) {
   return Object.keys(GROUP_LABEL).filter((g) => groups.has(g));
 }
 
-// 同意が1つも無ければ、介護ソフト用は保存しない
+// 同意が1つも無ければ、ケアプラン用は保存しない
 export const hasInputConsent = ({ input, plan }) => inputConsentGroups({ input, plan }).some((g) => plan.consentInput[g] === "yes");
 
 // 入口と同じ見出しで書き出す。元の値は残し、話で変わった欄だけを、同意があれば入れ替える

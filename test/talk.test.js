@@ -110,3 +110,17 @@ test("電話番号らしい数字や余計な項目はサーバーで止める",
   assert.ok(validateScribePayload({ memo: "公民館へ", plan: safe, identity: {} }).length > 0);
   assert.ok(validateScribePayload({ memo: " ", plan: safe }).length > 0);
 });
+
+test("台本：話のきっかけの問いと、次の声メモが合う", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { parseCsv, decodeCsv } = await import("../src/core/csv.js");
+  const { mockScribe } = await import("../src/server/mock-talk.js");
+  const { nextTopic } = await import("../src/core/talk.js");
+  const read = (name) => readFileSync(new URL(`../samples/${name}`, import.meta.url));
+  const { headers, rows } = parseCsv(decodeCsv(read("keahakka_okano.csv")));
+  const { plan } = importRow({ headers, row: rows[0], mapping: JSON.parse(read("keahakka.mapping.json")) });
+  JSON.parse(read("okano.script.json")).forEach((memo, i) => applyUpdates(plan, mockScribe(memo), i + 1));
+  assert.equal(plan.home.community.value, "中央自治会");
+  assert.equal(plan.contactMeans.value, "固定電話のみ");
+  assert.equal(nextTopic(plan, { gaps: serviceGaps(plan) }), null, "用意した話はすべて答えられている");
+});

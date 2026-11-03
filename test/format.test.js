@@ -81,12 +81,12 @@ test("欄に印が付く。両方にある欄は1つで、避難計画に入る�
   const fields = planFieldList(imported);
   const of = (label) => fields.find((f) => f.label === label);
   assert.equal(of("寝室の場所").mark, "両方");
-  assert.equal(of("避難場所").mark, "避難計画のみ");
+  assert.equal(of("避難場所").mark, "避難計画書のみ");
   assert.equal(fields.filter((f) => f.path === "home.bedroom").length, 1);
   assert.equal(of("知らせの受け方").mark, "様式の外");
   assert.equal(of("持ち出し").mark, "本人の1枚");
   const rank = (mark) => fields.findIndex((f) => f.mark === mark);
-  assert.ok(rank("避難計画のみ") < rank("様式の外"));
+  assert.ok(rank("避難計画書のみ") < rank("様式の外"));
 });
 
 test("両方の様式にある新しい欄は、まとめて1つにする", () => {
@@ -263,7 +263,7 @@ test("今の様式に無い分類の同意では、書き出せない", () => {
   assert.equal(hasCityConsent(plan, { consentGroups: { contact: {} } }), true);
 });
 
-test("介護ソフト用：入口の見出しに行き先がある分類だけ聞き、同意が無ければ保存しない", () => {
+test("ケアプラン用：入口の見出しに行き先がある分類だけ聞き、同意が無ければ保存しない", () => {
   const imported = okano();
   const groups = inputConsentGroups(imported);
   assert.ok(groups.includes("care"));
@@ -401,7 +401,7 @@ test("プログラムの部品と同じ見出しは止める。行末のカン�
   assert.deepEqual(parseCsv("氏名,電話,\nあ,い,\n").headers, ["氏名", "電話"]);
 });
 
-test("介護ソフト用：欄を空にしても元の値を残し、そのことを返す", () => {
+test("ケアプラン用：欄を空にしても元の値を残し、そのことを返す", () => {
   const imported = okano();
   editField(imported.plan, "care.stairs", "");
   const { row, kept } = buildInputRow(imported);

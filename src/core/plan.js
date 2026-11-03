@@ -27,7 +27,7 @@ export function createPlan() {
       helper: "unasked",
       other: "unasked",
     },
-    // 介護ソフトへ戻してよいか。市に渡す同意とは相手が違うので分ける
+    // ケアプランへ戻してよいか。市に渡す同意とは相手が違うので分ける
     consentInput: {
       contact: "unasked",
       care: "unasked",

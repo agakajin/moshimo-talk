@@ -1,4 +1,4 @@
-// 訪問終了の画面。今日できたことと次の一歩、同意、本人の1枚、市向け CSV、続き用ファイル
+// 訪問終了の画面。今日できたことと次の一歩、同意、本人の1枚、個別避難計画書の CSV、ケアプラン用の CSV、続き用ファイル
 import { toResumeFile } from "/core/plan.js";
 import { askedHelpers, buildInputRow, GROUP_LABEL, hasInputConsent, inputConsentGroups, planFieldList, requiredBlanks } from "/core/format.js";
 import { buildOneSheet, buildSummary, buildVillageRow, hasCityConsent, toCsvText } from "/core/output.js";
@@ -92,7 +92,7 @@ export function startWrap(state, findings, config) {
       // 「その他」だけでは何の同意か分からないので、列の名前を出す
       const others = Object.entries(state.input.mapping).filter(([, t]) => t.startsWith("extra.")).map(([h]) => h);
       const label = group === "other" ? `${GROUP_LABEL.other}（${others.join("、")}）` : GROUP_LABEL[group];
-      const select = el("select", { ariaLabel: `${label}を介護ソフトへ戻すか` });
+      const select = el("select", { ariaLabel: `${label}をケアプランへ戻すか` });
       for (const [value, text] of [["unasked", "まだ聞いていない"], ["yes", "戻してよい"], ["no", "戻さない"]]) select.append(el("option", { value, textContent: text }));
       select.value = plan.consentInput[group];
       select.addEventListener("change", () => {
@@ -156,7 +156,7 @@ export function startWrap(state, findings, config) {
     renderRequired();
     if (state.input) renderInputChanges();
   };
-  $("outputTitle").textContent = `${config.name ?? "市"}に渡すもの`;
+  $("outputTitle").textContent = `${config.name ?? "市"}に渡す個別避難計画書`;
   renderSummary();
   renderConsent();
   renderSheet();
@@ -167,7 +167,7 @@ export function startWrap(state, findings, config) {
 
   $("print").onclick = () => { renderSheet(); window.print(); };
   $("csvDownload").onclick = () => download(`${config.name ?? "plan"}-plan.csv`, toCsvText(config.columns, csvRow()), "text/csv;charset=utf-8");
-  $("inputDownload").onclick = () => download("kaigo-soft-updated.csv", toCsvText(state.input.headers, buildInputRow({ input: state.input, plan }).row), "text/csv;charset=utf-8");
+  $("inputDownload").onclick = () => download("careplan-updated.csv", toCsvText(state.input.headers, buildInputRow({ input: state.input, plan }).row), "text/csv;charset=utf-8");
   $("resumeDownload").onclick = () => download("hinan-hanashi-resume.json", JSON.stringify(toResumeFile({ ...state, looseMemos: state.looseMemoTexts?.() ?? [] }), null, 2), "application/json");
   $("backToTalk").onclick = () => {
     $("wrap").hidden = true;

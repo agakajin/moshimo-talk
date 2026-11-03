@@ -25,6 +25,8 @@ export function mockScribe(memo) {
       value: { alias: "隣の人", awayWeekdayDaytime: /平日の昼.*(村の外|いない|仕事)/.test(memo), asked: false },
     });
   }
+  const community = memo.match(/([^。、]*自治会)に入/);
+  if (community) set("home.community", community[1]);
   if (/固定電話/.test(memo)) set("contactMeans", /だけ|のみ/.test(memo) ? "固定電話のみ" : "固定電話");
   if (/薬|電池/.test(memo) && /袋|持って/.test(memo)) {
     const bag = memo.match(/^(.+?)を、?(.+?)に/);

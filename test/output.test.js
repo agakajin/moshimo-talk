@@ -48,7 +48,7 @@ test("手伝う人が決まっていなくても出せて、未決定と出る",
   assert.equal(column(row, "避難支援者1氏名"), "未決定");
   assert.equal(column(row, "避難支援者2氏名"), "", "2人目は任意");
   assert.equal(column(row, "緊急連絡先1電話"), "000-0000-0001");
-  assert.equal(column(row, "自治会名"), "未決定");
+  assert.equal(column(row, "自治会名"), "中央自治会");
   assert.equal(row.length, config.columns.length);
 });
 

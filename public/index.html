@@ -27,7 +27,7 @@
     </ol>
 
     <section id="step1" class="panel">
-      <h2>介護ソフトの CSV を入れる</h2>
+      <h2>ケアプランの CSV を入れる</h2>
       <p class="hint">ファイルはこの画面の中で読みます。この時点では、どこにも送りません。</p>
       <div class="row">
         <label class="button primary">CSV を選ぶ
@@ -85,11 +85,11 @@
     </section>
 
     <section id="step4" class="panel" hidden>
-      <h2>どの様式で渡しますか</h2>
+      <h2>個別避難計画書を、どの様式で渡しますか</h2>
       <p class="hint">計画の欄は、ここで選んだ様式に合わせます。見出しだけを読み、値は使いません。架空の様式です。</p>
       <div class="row">
-        <button id="formatDefault" class="button">ハッカ村の様式</button>
-        <button id="formatMint" class="button">ミント市の様式</button>
+        <button id="formatDefault" class="button">個別避難計画書（ハッカ村の様式）</button>
+        <button id="formatMint" class="button">個別避難計画書（ミント市の様式）</button>
         <label class="button">様式の CSV を選ぶ
           <input id="formatFile" type="file" accept=".csv,text/csv" hidden>
         </label>
@@ -231,18 +231,18 @@
       </div>
       <div class="wrap-col">
       <div class="panel">
-        <h2 id="outputTitle">市に渡すもの</h2>
+        <h2 id="outputTitle">市に渡す個別避難計画書</h2>
         <p class="notice">架空の決まりです。実際の同意の取り方と渡し方は、市の条例と法律の確認が必要です。同意は紙で確かめ、ここには結果だけ記録します。</p>
         <p id="requiredList" class="required-note" hidden></p>
         <h3>項目ごとの同意</h3>
         <p id="consentAlways" class="hint"></p>
         <p id="consentReset" class="notice" hidden>様式を変えたので、渡す相手が変わりました。同意を聞き直してください。</p>
         <div id="consentRows"></div>
-        <p id="csvBlocked" class="hint">同意した項目がないので、市向けの CSV は出ません。本人の1枚はこのまま渡せます。</p>
+        <p id="csvBlocked" class="hint">同意した項目がないので、個別避難計画書の CSV は出ません。本人の1枚はこのまま渡せます。</p>
         <p id="csvCheckHint" class="hint">手伝う人の同意がない間は、人の話が入った文を隠します。隠しきれない言い方もあるので、下の内容を読んで確かめてください。</p>
         <details open><summary>出す内容を確かめる</summary><div class="scroll"><table id="csvPreview"></table></div></details>
         <div class="row">
-          <button id="csvDownload" class="button primary">この様式の CSV を保存</button>
+          <button id="csvDownload" class="button primary">個別避難計画書の CSV を保存</button>
           <button id="resumeDownload" class="button">続き用ファイルを保存</button>
         </div>
         <p class="hint">続き用ファイルには名前や連絡先、体のこと、欄に入らなかった声メモの文字が入ります。保存した人の責任で扱ってください。画面を閉じると、この画面の内容は消えます。</p>
@@ -250,12 +250,12 @@
       </div>
 
       <div id="inputPanel" class="panel" hidden>
-        <h2>介護ソフト用に書き出す</h2>
-        <p class="hint">入口の CSV と同じ見出しの新しいファイルを作ります。元のファイルは変えません。市に渡す同意とは別に、戻してよいかを確かめて記録します。入口の見出しにある欄だけを戻し、見出しの無い内容は保存しません。ソフトに取り込めるかは、ソフトの対応しだいです。文字コードは UTF-8 です。</p>
+        <h2>ケアプラン用に書き出す</h2>
+        <p class="hint">取り込んだケアプランの CSV と同じ見出しの新しいファイルを作ります。元のファイルは変えません。市に渡す同意とは別に、戻してよいかを確かめて記録します。ケアプランの見出しにある欄だけを戻し、見出しの無い内容は保存しません。介護ソフトに取り込めるかは、ソフトの対応しだいです。文字コードは UTF-8 です。</p>
         <div id="inputConsentRows"></div>
         <ul id="inputChanges"></ul>
-        <p id="inputBlocked" class="hint">同意した項目がないので、介護ソフト用の CSV は保存しません。</p>
-        <div class="row"><button id="inputDownload" class="button primary">介護ソフト用の CSV を保存</button></div>
+        <p id="inputBlocked" class="hint">同意した項目がないので、ケアプラン用の CSV は保存しません。</p>
+        <div class="row"><button id="inputDownload" class="button primary">ケアプラン用の CSV を保存</button></div>
       </div>
       </div>
       </div>

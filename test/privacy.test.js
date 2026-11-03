@@ -723,3 +723,13 @@ test("となりの人を捨てず、メールアドレスを伏せる", () => {
   assert.equal(redact(`メールは${mail}です`), "メールは[メール]です");
   assert.equal(personalKind(mail), "メール");
 });
+
+test("手元の氏名：漢字＋仮名＋漢字も、名字と名前で探す。よくある名字＋続き柄を伏せる", () => {
+  const k = [{ value: "岡野ふみ子", alias: "本人" }];
+  assert.equal(redact("岡野の奥さんが来ます", k), "本人の奥さんが来ます");
+  assert.equal(redact("ふみ子は夜に起きます", k), "本人は夜に起きます");
+  for (const text of ["田中のおばさん", "田中のおじさん", "田中の嫁", "田中の孫", "田中の旦那さん", "田中のご主人", "田中の長男", "田中のお母さん", "田中のばあさん", "田中の家", "田中のところ"]) {
+    assert.ok(redact(text).includes("[お名前]"), text);
+  }
+  for (const text of ["隣のおばさん", "親戚の嫁", "同居の孫", "自分の家", "公民館のところ", "娘の車"]) assert.equal(redact(text), text, text);
+});
