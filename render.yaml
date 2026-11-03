@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: hinan-hanashi
+    name: built-with-claude-japan-2026-jingushi
     runtime: node
     plan: starter
     region: singapore
