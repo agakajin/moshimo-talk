@@ -127,7 +127,7 @@ export function startWrap(state, findings, config) {
     const allowed = hasInputConsent(state);
     $("inputBlocked").hidden = allowed;
     $("inputDownload").disabled = !allowed;
-    const { changes, kept } = buildInputRow({ input: state.input, plan });
+    const { changes, kept } = buildInputRow({ input: state.input, plan, fromOutput: state.fromOutput });
     const keptRows = kept.map((header) => el("li", { textContent: `${header}：欄を空にしましたが、元の値のまま戻します` }));
     $("inputChanges").replaceChildren(...keptRows, ...(changes.length
       ? changes.map((c) => el("li", { textContent: `${c.header}：${c.allowed ? `「${c.to}」に変えます` : `同意がないので元のまま（話では「${c.to}」）`}` }))
@@ -186,7 +186,7 @@ export function startWrap(state, findings, config) {
 
   $("print").onclick = () => { renderSheet(); window.print(); };
   $("csvDownload").onclick = () => download(`${config.name ?? "plan"}-plan.csv`, toCsvText(config.columns, csvRow()), "text/csv;charset=utf-8");
-  $("inputDownload").onclick = () => download("careplan-updated.csv", toCsvText(state.input.headers, buildInputRow({ input: state.input, plan }).row), "text/csv;charset=utf-8");
+  $("inputDownload").onclick = () => download("careplan-updated.csv", toCsvText(state.input.headers, buildInputRow({ input: state.input, plan, fromOutput: state.fromOutput }).row), "text/csv;charset=utf-8");
   $("resumeDownload").onclick = () => download("hinan-hanashi-resume.json", JSON.stringify(toResumeFile({ ...state, looseMemos: state.looseMemoTexts?.() ?? [] }), null, 2), "application/json");
   $("backToTalk").onclick = () => {
     $("wrap").hidden = true;

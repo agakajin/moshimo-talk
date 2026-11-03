@@ -3,6 +3,7 @@ import { decodeCsv, parseCsv } from "/core/csv.js";
 import { maskTable } from "/core/mask.js";
 import { findLeaks } from "/core/redact.js";
 import { attachOutput, checkResumedFormat, DEFAULT_TARGETS, duplicateHeaders, OUTPUT_TARGETS, suspiciousHeaders } from "/core/format.js";
+import { chooseConflict, describeFlows, findPersonRow, mergeOutputRow } from "/core/merge.js";
 import { fromResumeFile, importRow, serviceGaps } from "/core/plan.js";
 import { startTalk } from "/talk.js";
 
@@ -30,13 +31,14 @@ const TARGETS = {
   ignore: "使わない",
   unknown: "分からない（選んでください）",
 };
+// 話すことと、それで埋まる欄。もう片方のデータで分かっている話は聞かない
 const TALK_TOPICS = [
-  "大雨の夜の様子と、心配な災害",
-  "逃げる先",
-  "誰と、何で、何分で行くか",
-  "ご近所で顔を知っている人",
-  "避難の知らせの受け方",
-  "持ち出すもの",
+  ["大雨の夜の様子と、心配な災害", ["hazards.items"]],
+  ["逃げる先", ["evacuation.place"]],
+  ["誰と、何で、何分で行くか", ["evacuation.means", "evacuation.moveMinutes"]],
+  ["ご近所で顔を知っている人", []],
+  ["避難の知らせの受け方", ["contactMeans"]],
+  ["持ち出すもの", ["carry"]],
 ];
 const WEEK = ["月", "火", "水", "木", "金", "土", "日"];
 
@@ -48,7 +50,7 @@ const el = (tag, props = {}, ...children) => {
 };
 const showError = (node, message) => { node.textContent = message; node.hidden = !message; };
 
-const state = { table: null, masked: null, results: null };
+const state = { table: null, masked: null, results: null, slots: { care: null, plan: null } };
 
 const MANUAL_FIELDS = [
   ["self.name", "氏名"], ["self.kana", "ふりがな"], ["self.birth", "生年月日"], ["self.gender", "性別"],
@@ -91,53 +93,162 @@ async function beginTalk(imported, options = {}) {
 }
 
 function goTo(step) {
+  // 終わった段階は積み重ねず、今の段階だけを見せる
   for (let i = 1; i <= 5; i++) {
-    $(`step${i}`).hidden = i > step;
+    $(`step${i}`).hidden = i !== step;
     const mark = document.querySelector(`.steps [data-step="${i}"]`);
     mark.classList.toggle("current", i === step);
     mark.classList.toggle("done", i < step);
   }
-  $(`step${step}`).scrollIntoView({ behavior: "smooth", block: "nearest" });
+  if (step !== 1) $("manual").hidden = true;
+  window.scrollTo(0, 0);
 }
 
-function loadBytes(bytes) {
+// CSV を読み、問題があれば理由を返す。見出しだけの様式は needRows なしで通す
+function readTable(bytes, { needRows }) {
+  const table = parseCsv(decodeCsv(bytes));
+  if (table.unclosed) return { error: "引用符（\"）が閉じていない値があります。次の行まで1つの値に入ってしまうので、CSV を確かめてください。" };
+  if (table.headers.length === 0 || (needRows && table.rows.length === 0)) return { error: needRows ? "見出しとデータのある CSV を選んでください。" : "見出しのある CSV を選んでください。" };
+  const repeated = duplicateHeaders(table.headers);
+  if (repeated.length > 0) return { error: `同じ見出しが2つあります：${repeated.join("、")}。見出しを分けてから選んでください。` };
+  // 値のカンマで列がずれると、本物の値が別の欄に入る。取り込まずに知らせる
+  const shifted = table.rows.findIndex((r) => r.slice(table.headers.length).some((v) => v.trim() !== ""));
+  if (shifted >= 0) return { error: `${shifted + 2}行目の列の数が、見出しより多くなっています。値の中のカンマを確かめてください。` };
+  return { table };
+}
+
+function putSlot(key, name, bytes) {
+  showError($("fileError"), "");
+  const { table, error } = readTable(bytes, { needRows: key === "care" });
+  if (error) {
+    showError($("fileError"), `${name}：${error}`);
+    return;
+  }
+  state.slots[key] = { name, table };
+  renderSlots();
+}
+
+function renderSlots() {
+  const { care, plan } = state.slots;
+  for (const [key, id] of [["care", "slotCare"], ["plan", "slotPlan"]]) {
+    const box = $(id);
+    const data = state.slots[key];
+    box.classList.toggle("filled", Boolean(data));
+    box.querySelector(".slot-empty").hidden = Boolean(data);
+    box.querySelector(".slot-filled").hidden = !data;
+    if (!data) continue;
+    const { headers, rows } = data.table;
+    box.querySelector(".slot-name").textContent = data.name;
+    box.querySelector(".slot-info").textContent = rows.length > 0 ? `${rows.length}件、${headers.length}列` : `見出しだけ、${headers.length}列（値は入っていません）`;
+  }
+  $("connect").disabled = !care && !plan;
+  $("swapSlots").disabled = !care && !plan;
+  $("connectNote").textContent = care && plan ? "2つをつないで、話すことを絞ります。"
+    : care ? "計画書は入れなくても進めます。あとで様式を選びます。"
+    : plan ? "計画書の内容から始めます。"
+    : "";
+}
+
+async function takeFiles(key, files) {
+  await configReady;
+  if (state.publicDemo) {
+    showError($("fileError"), "公開版では実在のデータが入らないよう、架空の見本だけ使えます。");
+    return;
+  }
+  const other = key === "care" ? "plan" : "care";
+  const list = [...files].slice(0, 2);
+  const wrong = list.find((f) => !/\.csv$/i.test(f.name));
+  if (wrong) {
+    showError($("fileError"), `${wrong.name} は CSV ではありません。CSV を入れてください。`);
+    return;
+  }
+  // 2つ一緒に入れたら、もう片方にも入れる。逆なら ⇄ で入れ替えられる
+  const targets = list.length === 2 ? [key, other] : [key];
+  for (const [i, target] of targets.entries()) putSlot(target, list[i].name, new Uint8Array(await list[i].arrayBuffer()));
+}
+
+function connect() {
+  showError($("fileError"), "");
+  const { care, plan } = state.slots;
+  state.table = null;
+  state.masked = null;
+  state.mapping = null;
+  if (care) {
+    loadCare(care.table);
+    return;
+  }
+  if (plan) {
+    state.imported = freshImported();
+    prepareFormat();
+    goTo(4);
+  }
+}
+
+function loadCare(table) {
   // 訪問を始めたあとに遅れて届いた読み込みで、別の人の画面を開かない
   if (state.talkStarted) return;
-  showError($("fileError"), "");
   // 待っている答えは、前のファイルのもの
   columnsRequest += 1;
   $("send").disabled = false;
   $("sendState").hidden = true;
-  const refuse = (message) => {
-    state.table = null;
-    state.masked = null;
-    goTo(1);
-    showError($("fileError"), message);
-  };
-  const table = parseCsv(decodeCsv(bytes));
-  if (table.unclosed) {
-    refuse("引用符（\"）が閉じていない値があります。次の行まで1つの値に入ってしまうので、CSV を確かめてください。");
-    return;
-  }
-  if (table.headers.length === 0 || table.rows.length === 0) {
-    refuse("見出しとデータのある CSV を選んでください。");
-    return;
-  }
-  const repeated = duplicateHeaders(table.headers);
-  if (repeated.length > 0) {
-    refuse(`同じ見出しが2つあります：${repeated.join("、")}。見出しを分けてから選んでください。`);
-    return;
-  }
-  // 値のカンマで列がずれると、本物の値が別の欄に入る。取り込まずに知らせる
-  const shifted = table.rows.findIndex((r) => r.slice(table.headers.length).some((v) => v.trim() !== ""));
-  if (shifted >= 0) {
-    refuse(`${shifted + 2}行目の列の数が、見出しより多くなっています。値の中のカンマを確かめてください。`);
-    return;
-  }
   state.table = table;
   state.masked = maskTable(table);
   renderMask();
   goTo(2);
+}
+
+// 入口の値だけが入った計画を作り直す。もう片方の値を入れ直しても前の値が残らないように
+function freshImported() {
+  if (!state.table || !state.mapping) return importRow({ headers: [], row: [], mapping: {}, source: "human" });
+  return importRow({ headers: state.table.headers, row: state.table.rows[state.rowIndex], mapping: state.mapping });
+}
+
+// 計画書のファイルがあれば、その見出しで様式を読む。無ければ今の様式のまま
+function prepareFormat() {
+  const plan = state.slots.plan;
+  if (plan && state.formatTaken !== plan) {
+    state.formatTaken = plan;
+    takeFormat(plan.name, plan.table);
+    return;
+  }
+  if (!plan) {
+    state.formatTaken = null;
+    state.formatData = null;
+  }
+  chooseFormat(state.formatName ?? "ハッカ村", state.formatHeaders ?? null);
+}
+
+// 様式の見出しと値を受け取る。見出しは Claude へ送る前に見せ、値は手元に残す
+async function takeFormat(fileName, { headers, rows }) {
+  formatRequest += 1;
+  state.whoChosen = undefined;
+  $("formatDefault").disabled = false;
+  $("formatMint").disabled = false;
+  $("formatState").hidden = true;
+  $("formatSend").hidden = true;
+  $("formatGo").disabled = true;
+  $("formatWhoRow").hidden = true;
+  clearFlows();
+  showError($("formatError"), "");
+  const name = fileName.replace(/\.csv$/i, "");
+  // ハッカ村と同じ見出しなら、Claude に読ませない
+  const village = await loadVillage();
+  if (headers.length === village.columns.length && headers.every((h, i) => h === village.columns[i])) {
+    state.formatData = { name: "ハッカ村", headers, rows };
+    chooseFormat("ハッカ村", null);
+    return;
+  }
+  const suspicious = suspiciousHeaders(headers, state.imported ?? {});
+  if (suspicious.length > 0) {
+    state.formatData = null;
+    showError($("formatError"), `見出しに改行や、名前、番号らしいものがあるので、送らずに止めました：${suspicious.join("、")}`);
+    return;
+  }
+  state.formatData = { name, headers, rows };
+  // 取り込みと同じく、送る前に中身を見せる
+  $("formatSendList").textContent = headers.join("、");
+  $("formatSendGo").onclick = () => chooseFormat(name, headers);
+  $("formatSend").hidden = false;
 }
 
 function renderMask() {
@@ -242,9 +353,13 @@ function confirmMapping() {
     used.set(s.value, s.dataset.header);
     mapping[s.dataset.header] = s.value;
   }
-  state.imported = importRow({ headers: state.table.headers, row: state.table.rows[Number($("who").value) || 0], mapping });
+  state.mapping = mapping;
+  state.rowIndex = Number($("who").value) || 0;
+  // 別の方を選び直したら、計画書の行も選び直す
+  state.whoChosen = undefined;
+  state.imported = freshImported();
   // 様式を選んだあとで選び直したときは、その様式のままにする
-  chooseFormat(state.formatName ?? "ハッカ村", state.formatHeaders ?? null);
+  prepareFormat();
   goTo(4);
 }
 
@@ -288,7 +403,7 @@ async function chooseFormat(name, headers) {
     $("formatGo").disabled = false;
   } catch (e) {
     if (request !== formatRequest) return;
-    $("formatTable").replaceChildren();
+    clearFlows();
     showError($("formatError"), `様式を読めませんでした。${e.message}`);
   } finally {
     if (request === formatRequest) {
@@ -299,25 +414,151 @@ async function chooseFormat(name, headers) {
 }
 
 function renderFormat(columns) {
-  const table = $("formatTable");
-  $("formatChosen").textContent = `選んでいる様式：${state.formatName}`;
-  $("formatChosen").hidden = false;
-  table.replaceChildren(el("tr", {}, el("th", { textContent: `${state.formatName}の列` }), el("th", { textContent: "入れる内容" })));
-  for (const { header, target } of columns) {
-    const select = el("select", { ariaLabel: `${header} に入れる内容` });
-    select.dataset.header = header;
-    for (const [value, label] of Object.entries({ ...OUTPUT_TARGETS, unknown: "分からない（選んでください）" })) select.append(el("option", { value, textContent: label }));
-    // 人が手で直した選択は、様式を読み直しても残す
-    const edited = state.formatEdits?.[header];
-    select.value = edited ?? (target in OUTPUT_TARGETS ? target : "unknown");
-    const row = el("tr", { className: select.value === "unknown" ? "unknown" : "" }, el("td", { textContent: header }), el("td", {}, select));
+  state.formatColumns = columns;
+  state.formatOpen = new Set();
+  renderFormatWho();
+  renderFlows();
+}
+
+// 人が手で直した選択は、様式を読み直しても残す
+const currentColumns = () => (state.formatColumns ?? []).map(({ header, target }) => ({ header, target: state.formatEdits?.[header] ?? (target in OUTPUT_TARGETS ? target : "unknown") }));
+
+function clearFlows() {
+  state.formatColumns = [];
+  $("formatSummary").replaceChildren();
+  $("formatTable").replaceChildren();
+  $("formatUnused").hidden = true;
+  $("formatBackNote").hidden = true;
+}
+
+const FLOW_GROUPS = [
+  ["unknown", "選んでください", ""],
+  ["care", "ケアプランから渡す", "ケアプラン"],
+  ["plan", "前の計画書から渡す", "前の計画書"],
+  ["talk", "訪問で聞いて渡す", "訪問で聞く"],
+  ["hand", "手で入れて渡す", "手で入れる"],
+  ["auto", "自動で入る", ""],
+  ["none", "空のまま出す", ""],
+];
+const FLOW_PLAIN = { unknown: "入れる内容が分かりません", talk: "訪問で聞く", hand: "手元の情報に手で入れる", none: "入れません" };
+
+// 渡す様式の見え方：元 → 渡す先。直すときだけ選択肢を開く
+function renderFlows() {
+  const columns = currentColumns();
+  const data = activeFormatData();
+  const who = Number($("formatWho").value);
+  const { rows, unused } = describeFlows({
+    columns,
+    input: state.imported?.input,
+    plan: state.imported?.plan,
+    planHeaders: data?.headers,
+    planRow: data && who >= 0 ? data.rows[who] : null,
+  });
+
+  const count = (kind) => rows.filter((r) => r.kind === kind).length;
+  const sources = FLOW_GROUPS.filter(([kind, , label]) => label && count(kind) > 0).flatMap(([kind, , label], i) => [
+    ...(i > 0 ? [el("span", { className: "flow-plus", textContent: "＋" })] : []),
+    el("div", { className: `flow-source kind-${kind}` }, label, el("b", { textContent: `${count(kind)}列` })),
+  ]);
+  $("formatSummary").replaceChildren(...sources,
+    el("span", { className: "flow-to-all", textContent: "→" }),
+    el("div", { className: "flow-goal" }, "個別避難計画書", el("b", { textContent: `${state.formatName}の様式 ${columns.length}列` })));
+
+  $("formatTable").replaceChildren(...FLOW_GROUPS.filter(([kind]) => count(kind) > 0).map(([kind, title]) => el("section", { className: `flow-group kind-${kind}` },
+    el("h3", { className: "flow-head" }, title, el("small", { textContent: `${count(kind)}列` })),
+    el("div", { className: "flow-list" }, ...rows.filter((r) => r.kind === kind).map(flowRow)))));
+
+  $("formatUnused").hidden = unused.length === 0;
+  $("formatUnused").textContent = `ケアプランにあるけれど計画書へ渡さない列：${unused.join("、")}`;
+  $("formatBackNote").hidden = !state.imported?.input;
+}
+
+function flowRow(row) {
+  const { header, kind, target } = row;
+  const select = el("select", { ariaLabel: `${header} に入れる内容` });
+  select.dataset.header = header;
+  for (const [value, label] of Object.entries({ ...OUTPUT_TARGETS, unknown: "分からない（選んでください）" })) select.append(el("option", { value, textContent: label }));
+  select.value = target;
+  const open = kind === "unknown" || state.formatOpen?.has(header);
+  select.hidden = !open;
+  select.addEventListener("change", () => {
+    state.formatEdits ??= {};
+    state.formatEdits[header] = select.value;
+    state.formatOpen.add(header);
+    renderFormatWho();
+    renderFlows();
+    // 選び直した行は別のまとまりへ移るので、押していた場所を見失わないようにする
+    const moved = [...$("formatTable").querySelectorAll("select")].find((s) => s.dataset.header === header);
+    moved?.focus();
+    moved?.closest(".flow-row").scrollIntoView({ block: "nearest" });
+  });
+  const edit = el("button", { className: "button mini", type: "button", textContent: "直す" });
+  edit.hidden = open;
+  edit.addEventListener("click", () => {
+    state.formatOpen.add(header);
+    select.hidden = false;
+    edit.hidden = true;
+    select.focus();
+  });
+  const from = row.talked
+    ? [el("span", { textContent: "訪問で聞いた値" }), el("span", { className: "value", textContent: row.talked.join("、") })]
+    : row.from.length > 0
+      ? row.from.flatMap((c) => [el("span", { textContent: kind === "plan" ? "前の計画書" : c.header }), el("span", { className: "value", textContent: c.value })])
+      : [el("span", { className: "plain", textContent: kind === "auto" ? (target === "meta.serial" ? "仮の番号" : "作成した日") : FLOW_PLAIN[kind] })];
+  return el("div", { className: "flow-row" },
+    el("div", { className: "flow-from" }, ...from),
+    el("span", { className: "flow-arrow", textContent: "→" }),
+    el("div", { className: "flow-to", textContent: header }),
+    edit,
+    ...(row.differs ? [el("div", { className: "flow-differs", textContent: `計画書は「${row.differs}」です。次の画面でどちらを使うか選びます。` })] : []),
+    select);
+}
+
+// 今の様式と同じファイルの値だけを使う。訪問の途中では見出しだけを使う
+const activeFormatData = () => (state.formatData?.name === state.formatName && state.formatData.rows.length > 0 && !state.backToTalk ? state.formatData : null);
+const formatTargets = () => Object.fromEntries(currentColumns().map((c) => [c.header, c.target]));
+
+// 計画書のどの行を使うか。本人と一致する行が1つに決まれば選んでおき、決まらなければ入れないままにする
+function renderFormatWho() {
+  const data = activeFormatData();
+  $("formatWhoRow").hidden = !data;
+  if (!data) return;
+  const targets = formatTargets();
+  const nameAt = data.headers.findIndex((h) => targets[h] === "self.name");
+  const identity = state.imported?.identity ?? {};
+  const hit = findPersonRow(data, targets, identity);
+  // 比べる相手がなく1行だけなら、その行で始める
+  // 人が選んだ行は、列の対応を直しても変えない
+  const chosen = state.whoChosen ?? hit ?? (!identity["self.name"] && data.rows.length === 1 ? 0 : -1);
+  $("formatWho").replaceChildren(
+    el("option", { value: "-1", textContent: "値を入れない（見出しだけ使う）" }),
+    ...data.rows.map((row, i) => el("option", { value: String(i), textContent: `${i + 1}件目：${nameAt >= 0 ? row[nameAt] ?? "" : ""}` })),
+  );
+  $("formatWho").value = String(chosen);
+  $("formatWhoNote").textContent = hit !== null ? "ケアプランの方と同じ名前の行です。" : identity["self.name"] ? "ケアプランの方と同じ名前の行が見つかりません。同じ方なら選んでください。" : "";
+}
+
+function renderMerge(merge) {
+  $("mergeBox").hidden = !merge;
+  if (!merge) return;
+  const { filled, conflicts, unread, helpers } = merge;
+  $("mergeFilled").hidden = filled.length === 0;
+  $("mergeFilled").textContent = `計画書から入った欄：${filled.map((f) => f.label).join("、")}`;
+  $("mergeConflicts").replaceChildren(...conflicts.map((c) => {
+    const select = el("select", { ariaLabel: `${c.label} に使う値` });
+    select.append(el("option", { value: "current", textContent: `${state.table ? "ケアプラン" : "今の値"}：${c.current}` }), el("option", { value: "incoming", textContent: `計画書：${c.incoming}` }));
     select.addEventListener("change", () => {
-      row.classList.toggle("unknown", select.value === "unknown");
-      state.formatEdits ??= {};
-      state.formatEdits[header] = select.value;
+      chooseConflict(state.imported, c, select.value === "incoming");
+      renderResult(state.imported);
     });
-    table.append(row);
-  }
+    return el("div", { className: "merge-conflict" }, el("span", { textContent: `${c.label}が違います` }), select);
+  }));
+  const notes = [];
+  if (conflicts.length === 0 && filled.length === 0) notes.push("計画書から新しく入った欄はありません。");
+  if (helpers.length > 0) notes.push(`前の計画書に手伝う人がいます（${helpers.join("、")}）。今も頼めるかを話の中で確かめ、印を付けてください。`);
+  if ((state.imported.leftovers ?? []).length > 0) notes.push(`1列にまとめて書かれていた文は、欄に分けず手元に残しました：${state.imported.leftovers.map((l) => l.label).join("、")}`);
+  if (unread.length > 0) notes.push(`形を読めなかったので入れていません：${unread.join("、")}`);
+  $("mergeNotes").replaceChildren(...notes.map((n) => el("li", { textContent: n })));
 }
 
 async function confirmFormat() {
@@ -329,11 +570,18 @@ async function confirmFormat() {
     return;
   }
   const village = await loadVillage();
+  // 選び直しても前の値が混ざらないよう、訪問の前は入口の値から作り直して入れる
+  const data = activeFormatData();
+  if (!state.backToTalk) state.imported = freshImported();
   attachOutput(state.imported, {
     base: village,
     name: state.formatName,
     columns: selects.map((s) => ({ header: s.dataset.header, target: s.value })),
   });
+  const who = Number($("formatWho").value);
+  const merge = data && who >= 0
+    ? mergeOutputRow(state.imported, { headers: data.headers, row: data.rows[who], targets: state.imported.output.targets, blankValue: state.imported.output.blankValue })
+    : null;
   // 訪問の途中で変えたときは、話の画面へ戻る
   if (state.backToTalk) {
     const fromWrap = state.fromWrap;
@@ -347,6 +595,7 @@ async function confirmFormat() {
     return;
   }
   renderResult(state.imported);
+  renderMerge(merge);
   goTo(5);
 }
 
@@ -407,7 +656,8 @@ function renderResult({ identity, plan, notes }) {
   ].filter(([, v]) => v);
   $("known").replaceChildren(...known.flatMap(([k, v]) => [el("dt", { textContent: k }), el("dd", { textContent: v })]));
 
-  const topics = [...TALK_TOPICS];
+  const isFilled = (path) => path.split(".").reduce((o, k) => o?.[k], plan)?.status === "filled";
+  const topics = TALK_TOPICS.filter(([, paths]) => paths.length === 0 || !paths.every(isFilled)).map(([text]) => text);
   if (!plan.care.mobility.value) topics.unshift("歩き方や、避難のときに気をつけること");
   if (!identity["emergency.name"]) topics.unshift("もしものときの連絡先");
   const gaps = serviceGaps(plan);
@@ -447,15 +697,64 @@ function renderChecks(identity, plan) {
   $("checks").replaceChildren(...notes.map((n) => el("p", { className: "notice", textContent: n })));
 }
 
-$("file").addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  if (file) loadBytes(new Uint8Array(await file.arrayBuffer()));
-  e.target.value = "";
+for (const [id, key] of [["file", "care"], ["planFile", "plan"]]) {
+  $(id).addEventListener("change", async (e) => {
+    const files = [...e.target.files];
+    e.target.value = "";
+    if (files.length > 0) takeFiles(key, files);
+  });
+}
+const putSample = async (key, name) => {
+  const res = await fetch(`/samples/${name}`);
+  putSlot(key, name, new Uint8Array(await res.arrayBuffer()));
+};
+document.querySelectorAll("[data-sample]").forEach((b) => b.addEventListener("click", () => putSample("care", b.dataset.sample)));
+document.querySelectorAll("[data-plan-sample]").forEach((b) => b.addEventListener("click", () => putSample("plan", b.dataset.planSample)));
+document.querySelectorAll(".slot").forEach((box) => {
+  const key = box.dataset.slot;
+  box.querySelector(".slot-remove").addEventListener("click", () => {
+    state.slots[key] = null;
+    showError($("fileError"), "");
+    renderSlots();
+  });
+  box.addEventListener("dragover", (e) => {
+    if (!e.dataTransfer?.types.includes("Files")) return;
+    e.preventDefault();
+    box.classList.add("over");
+  });
+  box.addEventListener("dragleave", (e) => {
+    if (!box.contains(e.relatedTarget)) box.classList.remove("over");
+  });
+  box.addEventListener("drop", (e) => {
+    box.classList.remove("over");
+    if (e.dataTransfer?.files.length > 0) takeFiles(key, e.dataTransfer.files);
+  });
 });
-document.querySelectorAll("[data-sample]").forEach((b) => b.addEventListener("click", async () => {
-  const res = await fetch(`/samples/${b.dataset.sample}`);
-  loadBytes(new Uint8Array(await res.arrayBuffer()));
-}));
+// 枠の外に落としても、ブラウザがファイルを開いて入力が消えないようにする
+for (const type of ["dragover", "drop"]) {
+  window.addEventListener(type, (e) => {
+    if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+  });
+}
+$("swapSlots").addEventListener("click", () => {
+  const { care, plan } = state.slots;
+  if (plan && plan.table.rows.length === 0) {
+    showError($("fileError"), "見出しだけのファイルはケアプランの側に入れられません。");
+    return;
+  }
+  showError($("fileError"), "");
+  state.slots = { care: plan, plan: care };
+  renderSlots();
+});
+$("connect").addEventListener("click", connect);
+const backToStart = () => {
+  columnsRequest += 1;
+  $("send").disabled = false;
+  $("sendState").hidden = true;
+  goTo(1);
+};
+$("sendBack").addEventListener("click", backToStart);
+$("confirmBack").addEventListener("click", () => goTo(2));
 $("send").addEventListener("click", sendColumns);
 $("formatDefault").addEventListener("click", () => chooseFormat("ハッカ村", null));
 $("formatMint").addEventListener("click", async () => {
@@ -470,37 +769,19 @@ $("formatFile").addEventListener("change", async (e) => {
   const file = e.target.files[0];
   e.target.value = "";
   if (!file) return;
-  const { headers, unclosed } = parseCsv(decodeCsv(new Uint8Array(await file.arrayBuffer())));
-  formatRequest += 1;
-  $("formatDefault").disabled = false;
-  $("formatMint").disabled = false;
-  $("formatState").hidden = true;
-  $("formatSend").hidden = true;
-  $("formatGo").disabled = true;
-  $("formatTable").replaceChildren();
-  showError($("formatError"), "");
-  if (unclosed) {
-    showError($("formatError"), "引用符（\"）が閉じていない見出しや値があります。CSV を確かめてください。");
+  const { table, error } = readTable(new Uint8Array(await file.arrayBuffer()), { needRows: false });
+  if (error) {
+    formatRequest += 1;
+    $("formatGo").disabled = true;
+    clearFlows();
+    showError($("formatError"), error);
     return;
   }
-  if (headers.length === 0) {
-    showError($("formatError"), "見出しのある CSV を選んでください。");
-    return;
-  }
-  const repeated = duplicateHeaders(headers);
-  if (repeated.length > 0) {
-    showError($("formatError"), `同じ見出しが2つあります：${repeated.join("、")}。「本人の氏名」「支援者の氏名」のように分けてから選んでください。`);
-    return;
-  }
-  const suspicious = suspiciousHeaders(headers, state.imported ?? {});
-  if (suspicious.length > 0) {
-    showError($("formatError"), `見出しに改行や、名前、番号らしいものがあるので、送らずに止めました：${suspicious.join("、")}`);
-    return;
-  }
-  // 取り込みと同じく、送る前に中身を見せる
-  $("formatSendList").textContent = headers.join("、");
-  $("formatSendGo").onclick = () => chooseFormat(file.name.replace(/\.csv$/i, ""), headers);
-  $("formatSend").hidden = false;
+  takeFormat(file.name, table);
+});
+$("formatWho").addEventListener("change", () => {
+  state.whoChosen = Number($("formatWho").value);
+  renderFlows();
 });
 $("formatGo").addEventListener("click", confirmFormat);
 $("formatBack").addEventListener("click", () => {
@@ -529,8 +810,6 @@ $("stepFormat").addEventListener("click", () => {
 $("changeFormat").addEventListener("click", openFormat);
 $("wrapFormat").addEventListener("click", openFormat);
 $("confirm").addEventListener("click", confirmMapping);
-// 確定したあとで選び直したら、確定をやり直す。別の人の計画で始めないため
-for (const id of ["who", "confirmTable"]) $(id).addEventListener("change", () => { if (!$("step4").hidden) goTo(3); });
 $("startTalk").addEventListener("click", () => beginTalk(state.imported));
 
 $("manualForm").append(...MANUAL_FIELDS.map(([key, label]) => el("label", { className: "field-label" }, label, el("input", { className: "plan-input", name: key }))));
@@ -575,12 +854,16 @@ document.querySelectorAll("[data-quick]").forEach((b) => b.addEventListener("cli
   const table = parseCsv(decodeCsv(new Uint8Array(bytes)));
   beginTalk(importRow({ headers: table.headers, row: table.rows[0], mapping }), { script });
 }));
-fetch("/api/config").then((r) => r.json()).then(({ publicDemo }) => {
+const configReady = fetch("/api/config").then((r) => r.json()).then(({ publicDemo }) => {
   if (!publicDemo) return;
   // 公開デモでは実在のデータが入らないよう、架空のサンプルだけにする
+  state.publicDemo = true;
   $("file").closest("label").hidden = true;
+  $("planFile").closest("label").hidden = true;
   $("resume").closest("label").hidden = true;
   $("formatFile").closest("label").hidden = true;
   $("manualStart").hidden = true;
+  document.querySelectorAll(".slot-drop").forEach((p) => { p.textContent = "公開版は架空の見本だけ使えます"; });
 }).catch(() => {});
+renderSlots();
 goTo(1);

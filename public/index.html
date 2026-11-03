@@ -9,8 +9,8 @@
 <body>
   <p class="demo-banner">架空データ専用のデモです。本物の利用者データは入れないでください。</p>
   <header class="top">
-    <h1>取り込み</h1>
-    <p>同じことを二度聞かないために、手元のデータで分かる欄を先に埋めます。</p>
+    <h1>データをつなぐ</h1>
+    <p>同じことを二度聞かないために、2つのデータを1つにつなぎます。</p>
     <div class="top-actions">
       <button id="changeFormat" class="button">様式を変える</button>
       <button id="goWrap" class="button primary">訪問終了</button>
@@ -19,7 +19,7 @@
 
   <main>
     <ol class="steps" aria-label="進み具合">
-      <li data-step="1">CSV を入れる</li>
+      <li data-step="1">データを入れる</li>
       <li data-step="2">送る中身を見る</li>
       <li data-step="3">列を確かめる</li>
       <li data-step="4">渡す様式を選ぶ</li>
@@ -27,23 +27,62 @@
     </ol>
 
     <section id="step1" class="panel">
-      <h2>ケアプランの CSV を入れる</h2>
-      <p class="hint">ファイルはこの画面の中で読みます。この時点では、どこにも送りません。</p>
+      <h2>つなぎたいデータを2つ入れる</h2>
+      <p class="hint">ファイルはこの画面の中で読みます。この時点では、どこにも送りません。片方だけでも始められます。</p>
+      <div class="slots">
+        <div id="slotCare" class="slot" data-slot="care">
+          <h3>ケアプラン</h3>
+          <div class="slot-empty">
+            <p class="slot-drop">CSV をここにドラッグ</p>
+            <div class="slot-actions">
+              <label class="button">ファイルを選ぶ
+                <input id="file" type="file" accept=".csv,text/csv" hidden>
+              </label>
+              <button class="button" data-sample="keahakka_okano.csv">見本：岡野さん</button>
+              <button class="button" data-sample="keahakka_yoshikawa.csv">見本：𠮷川さん</button>
+            </div>
+          </div>
+          <div class="slot-filled" hidden>
+            <p class="slot-name"></p>
+            <p class="slot-info hint"></p>
+            <button class="button slot-remove" type="button">外す</button>
+          </div>
+        </div>
+        <div class="slot-link">
+          <button id="swapSlots" class="button" type="button" aria-label="2つのデータを入れ替える" title="2つのデータを入れ替える">⇄</button>
+        </div>
+        <div id="slotPlan" class="slot" data-slot="plan">
+          <h3>個別避難計画書</h3>
+          <div class="slot-empty">
+            <p class="slot-drop">CSV をここにドラッグ</p>
+            <div class="slot-actions">
+              <label class="button">ファイルを選ぶ
+                <input id="planFile" type="file" accept=".csv,text/csv" hidden>
+              </label>
+              <button class="button" data-plan-sample="hakka-keikaku.csv">見本：ハッカ村の計画書</button>
+            </div>
+          </div>
+          <div class="slot-filled" hidden>
+            <p class="slot-name"></p>
+            <p class="slot-info hint"></p>
+            <button class="button slot-remove" type="button">外す</button>
+          </div>
+        </div>
+      </div>
+      <p id="fileError" class="error" role="alert" hidden></p>
       <div class="row">
-        <label class="button primary">CSV を選ぶ
-          <input id="file" type="file" accept=".csv,text/csv" hidden>
-        </label>
+        <button id="connect" class="button primary" disabled>つないで進む</button>
+        <span id="connectNote" class="hint connect-note"></span>
+      </div>
+      <div class="row start-others">
         <button id="manualStart" class="button">CSV なしで始める</button>
         <label class="button">続きから
           <input id="resume" type="file" accept=".json,application/json" hidden>
         </label>
-        <span class="or">架空のデータで試す</span>
-        <button id="quickStart" class="button primary" data-quick="okano">岡野さんで、すぐ試す</button>
-        <button id="quickStartB" class="button" data-quick="yoshikawa">𠮷川さんで、すぐ試す</button>
-        <button class="button" data-sample="keahakka_okano.csv">岡野ハルさん</button>
-        <button class="button" data-sample="keahakka_yoshikawa.csv">𠮷川正一さん</button>
+        <span class="or">台本つきで試す</span>
+        <button id="quickStart" class="button" data-quick="okano">岡野さん</button>
+        <button id="quickStartB" class="button" data-quick="yoshikawa">𠮷川さん</button>
       </div>
-      <p id="fileError" class="error" role="alert" hidden></p>
     </section>
 
     <section id="manual" class="panel" hidden>
@@ -64,6 +103,7 @@
       </details>
       <div class="row">
         <button id="send" class="button primary">この中身を送って、列を読んでもらう</button>
+        <button id="sendBack" class="button">戻る</button>
       </div>
       <p id="sendState" class="work-state" role="status" hidden>Claude が列の見出しを読んでいます。10秒ほどかかります。</p>
       <p id="sendError" class="error" role="alert" hidden></p>
@@ -81,12 +121,13 @@
       <p id="confirmError" class="error" role="alert" hidden></p>
       <div class="row">
         <button id="confirm" class="button primary">この内容で確定する</button>
+        <button id="confirmBack" class="button">戻る</button>
       </div>
     </section>
 
     <section id="step4" class="panel" hidden>
       <h2>個別避難計画書を、どの様式で渡しますか</h2>
-      <p class="hint">計画の欄は、ここで選んだ様式に合わせます。見出しだけを読み、値は使いません。架空の様式です。</p>
+      <p class="hint">計画の欄は、ここで選んだ様式に合わせます。Claude が読むのは見出しだけです。計画書に入っている値は、この画面の中で計画に入れます。架空の様式です。</p>
       <div class="row">
         <button id="formatDefault" class="button">個別避難計画書（ハッカ村の様式）</button>
         <button id="formatMint" class="button">個別避難計画書（ミント市の様式）</button>
@@ -101,8 +142,15 @@
       </div>
       <p id="formatState" class="work-state" role="status" hidden>Claude が様式の見出しを読んでいます。10秒ほどかかります。</p>
       <p id="formatNotice" class="notice" hidden></p>
-      <p id="formatChosen" class="hint" hidden></p>
-      <div class="scroll"><table id="formatTable"></table></div>
+      <div id="formatSummary" class="flow-summary"></div>
+      <div id="formatWhoRow" class="row who" hidden>
+        <label for="formatWho">計画書のどの方の値を入れますか</label>
+        <select id="formatWho"></select>
+        <span id="formatWhoNote" class="hint who-note"></span>
+      </div>
+      <div id="formatTable" class="flow-groups"></div>
+      <p id="formatUnused" class="hint" hidden></p>
+      <p id="formatBackNote" class="hint" hidden>⇄ 訪問で変わった欄は、同意があれば訪問終了でケアプランにも戻せます。</p>
       <p id="formatError" class="error" role="alert" hidden></p>
       <div class="row">
         <button id="formatGo" class="button primary" disabled>この様式で進む</button>
@@ -112,6 +160,12 @@
 
     <section id="step5" class="panel" hidden>
       <h2>聞かなくてよいことと、話すこと</h2>
+      <div id="mergeBox" class="merge-box" hidden>
+        <h3>つないだ結果</h3>
+        <p id="mergeFilled" class="merge-filled" hidden></p>
+        <div id="mergeConflicts"></div>
+        <ul id="mergeNotes" class="merge-notes"></ul>
+      </div>
       <div class="columns">
         <div>
           <h3>分かったこと</h3>
@@ -197,6 +251,10 @@
               <summary>手元の情報（Claude に送りません）</summary>
               <div id="localFields"></div>
               <p id="localError" class="error" role="alert" hidden></p>
+              <div id="localLeftBox" hidden>
+                <p class="field-label">前の計画書の文（欄に分けていません）</p>
+                <ul id="localLeft" class="people"></ul>
+              </div>
             </details>
           </div>
         </div>

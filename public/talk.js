@@ -129,6 +129,10 @@ export function startTalk(state, { script = null } = {}) {
     return el("label", { className: "field-label" }, label, input);
   }));
 
+  // 欄に分けられなかった前の計画書の文。Claude に送らず、話の参考に手元で見せる
+  $("localLeft").replaceChildren(...(state.leftovers ?? []).map(({ label, value }) => el("li", { textContent: `${label}：${value}` })));
+  $("localLeftBox").hidden = !state.leftovers?.length;
+
   $("talk").hidden = false;
   renderAll();
   renderPeople();
@@ -487,7 +491,7 @@ export function startTalk(state, { script = null } = {}) {
       // 打っている欄の文字は消さない。移している間は打っていないので、行き先にも値を見せる
       if (document.activeElement !== input || input.readOnly) input.value = f.value ?? "";
       input.readOnly = Boolean(choosing);
-      note.textContent = moving === path ? "これを移します" : choosing ? "" : isLatest ? (f.source === "human" ? "移しました" : "いま入った") : SOURCE[f.source] ?? "";
+      note.textContent = moving === path ? "これを移します" : choosing ? "" : isLatest ? (f.source === "human" ? "移しました" : "いま入った") : f.source === "csv" && state.fromOutput?.includes(path) ? "計画書から" : SOURCE[f.source] ?? "";
       move.hidden = Boolean(choosing) || !fresh.has(path) || f.status !== "filled";
       here.hidden = !choosing || moving === path;
     }

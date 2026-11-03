@@ -116,7 +116,7 @@ const EXPANDS = {
   "evacuation.summary": ["evacuation.means", "evacuation.prepMinutes", "evacuation.moveMinutes"],
   "evacuation.minutes": ["evacuation.prepMinutes", "evacuation.moveMinutes"],
 };
-const expand = (target) => EXPANDS[target] ?? [target];
+export const expand = (target) => EXPANDS[target] ?? [target];
 
 // 同意がなくても出す、本人を特定する列
 const ALWAYS = new Set(["meta.serial", "meta.createdOn", "self.name", "self.kana", "self.birth", "self.gender", "self.postal", "self.address", "home.community"]);
@@ -306,7 +306,7 @@ export function inputConsentGroups({ input, plan }) {
 export const hasInputConsent = ({ input, plan }) => inputConsentGroups({ input, plan }).some((g) => plan.consentInput[g] === "yes");
 
 // 入口と同じ見出しで書き出す。元の値は残し、話で変わった欄だけを、同意があれば入れ替える
-export function buildInputRow({ input, plan }) {
+export function buildInputRow({ input, plan, fromOutput = [] }) {
   const changes = [];
   const kept = [];
   const row = input.headers.map((header, i) => {
@@ -315,7 +315,8 @@ export function buildInputRow({ input, plan }) {
     const f = target && getAt(plan, target);
     // 欄を空にしても、元の値は消さない。そのことを画面で知らせる
     if (f && typeof f === "object" && "status" in f && !filled(f) && raw.trim() !== "") kept.push(header);
-    if (!filled(f) || typeof f.value !== "string" || !["voice", "human"].includes(f.source) || f.value === raw) return raw;
+    // 個別避難計画書から入った値も、話で変わった値と同じく、同意があれば戻す
+    if (!filled(f) || typeof f.value !== "string" || !(["voice", "human"].includes(f.source) || fromOutput.includes(target)) || f.value === raw) return raw;
     const group = GROUP(target);
     const allowed = plan.consentInput[group] === "yes";
     changes.push({ header, from: raw, to: f.value, group, allowed });
