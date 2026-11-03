@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>hinan-hanashi</title>
+  <title>個別避難計画づくり</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -12,12 +12,39 @@
     <h1>データをつなぐ</h1>
     <p>同じことを二度聞かないために、2つのデータを1つにつなぎます。</p>
     <div class="top-actions">
+      <a class="button" href="/howto.html" target="_blank" rel="noopener">使い方</a>
       <button id="changeFormat" class="button">様式を変える</button>
       <button id="goWrap" class="button primary">訪問終了</button>
     </div>
   </header>
 
   <main>
+    <section id="hero" class="hero">
+      <a class="button hero-howto" href="/howto.html" target="_blank" rel="noopener">使い方</a>
+      <h1>同じことを二度聞かずに、<br>個別避難計画を作る道具です</h1>
+      <p class="hero-lead">訪問して話を聞く方（ケアマネジャーなど）のために、ケアプランと個別避難計画書をつなぎます。分かっていることは先に埋まり、足りないことだけを会話で聞けます。</p>
+      <div class="hero-flow">
+        <div class="hero-part">
+          <p class="hero-verb">1. 入れる</p>
+          <p class="hero-chip kind-care">ケアプラン</p>
+          <p class="hero-chip kind-plan">個別避難計画書</p>
+        </div>
+        <span class="hero-arrow" aria-hidden="true">→</span>
+        <div class="hero-part">
+          <p class="hero-verb">2. 話す</p>
+          <p class="hero-chip kind-talk hero-chip-tall">足りないことだけ聞く</p>
+        </div>
+        <span class="hero-arrow" aria-hidden="true">→</span>
+        <div class="hero-part">
+          <p class="hero-verb">3. 渡す</p>
+          <p class="hero-chip kind-hand">ご本人へ：本人の1枚</p>
+          <p class="hero-chip kind-plan">市へ：個別避難計画書</p>
+          <p class="hero-chip kind-care">ケアマネへ：ケアプラン</p>
+        </div>
+      </div>
+      <p class="hero-note">決めるのはご本人です。この道具が、ご本人や手伝う人に連絡することはありません。</p>
+    </section>
+
     <ol class="steps" aria-label="進み具合">
       <li data-step="1">データを入れる</li>
       <li data-step="2">送る中身を見る</li>

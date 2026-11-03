@@ -128,7 +128,7 @@ export function formatPhone(digits) {
 export const hasCityConsent = (plan, config) => Object.keys(config?.consentGroups ?? plan.consent).some((g) => plan.consent[g] === "yes");
 
 // 出口の様式に当てはめる。同意していない項目は空にする
-export function buildVillageRow({ plan, identity, people = [], config, createdOn, serial = "仮-0001" }) {
+export function buildVillageRow({ plan, identity, people = [], config, createdOn, ownNumbers = {} }) {
   const helper = (i) => {
     const h = askedHelpers(plan, people)[i];
     const person = h && people.find((p) => p.alias === h.alias);
@@ -141,7 +141,6 @@ export function buildVillageRow({ plan, identity, people = [], config, createdOn
   const hazards = [plan.hazards.items, plan.home.hazardNote].map(open).filter(Boolean).join("；");
   const minutes = totalMinutes(plan);
   const direct = {
-    "meta.serial": serial,
     "meta.createdOn": createdOn,
     "self.name": identity["self.name"] ?? "",
     "self.kana": identity["self.kana"] ?? "",
@@ -169,10 +168,12 @@ export function buildVillageRow({ plan, identity, people = [], config, createdOn
   const valueOf = (column) => {
     const target = config.targets?.[column] ?? DEFAULT_TARGETS[column];
     if (target === undefined) return "";
+    // 番号は読み込んだ計画書の値のまま。無ければ新しく付けず、空で出す
+    if (target === "meta.serial") return ownNumbers[column] ?? "";
     return target in direct ? direct[target] : open(getAt(plan, target));
   };
   const allowed = new Set(config.alwaysColumns);
-  const optional = new Set(config.columns.filter((c) => ["none", "helper2.name", "helper2.relation", "helper2.phone"].includes(config.targets?.[c] ?? DEFAULT_TARGETS[c])));
+  const optional = new Set(config.columns.filter((c) => ["none", "meta.serial", "helper2.name", "helper2.relation", "helper2.phone"].includes(config.targets?.[c] ?? DEFAULT_TARGETS[c])));
   for (const [group, def] of Object.entries(config.consentGroups)) {
     if (plan.consent[group] === "yes") def.columns.forEach((c) => allowed.add(c));
   }

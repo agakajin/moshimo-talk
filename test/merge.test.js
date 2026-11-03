@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { decodeCsv, parseCsv } from "../src/core/csv.js";
-import { attachOutput, buildInputRow, DEFAULT_TARGETS } from "../src/core/format.js";
+import { attachOutput, buildInputRow, DEFAULT_TARGETS, isOwnNumberColumn } from "../src/core/format.js";
+import { buildVillageRow } from "../src/core/output.js";
 import { chooseConflict, describeFlows, findPersonRow, mergeOutputRow } from "../src/core/merge.js";
 import { fromResumeFile, importRow, toResumeFile } from "../src/core/plan.js";
 
@@ -86,7 +87,7 @@ test("計画書から入った印は、続き用ファイルでも残る", () =>
   merge(imported, { 管理番号: "H-0012", 自治会名: "ミドリ区自治会", 避難方法: "車いすで30分" });
   const back = fromResumeFile(JSON.parse(JSON.stringify(toResumeFile(imported))));
   assert.deepEqual(back.fromOutput, ["home.community"]);
-  assert.equal(back.serial, "H-0012");
+  assert.deepEqual(back.ownNumbers, { 管理番号: "H-0012" });
   assert.equal(back.leftovers[0].label, "避難方法");
 });
 
@@ -121,6 +122,30 @@ test("訪問で聞いた値は、もとの CSV の値より先に見せる", () 
   const { rows } = describeFlows({ columns: [{ header: "歩行", target: "care.mobility" }], input: imported.input, plan: imported.plan });
   assert.equal(rows[0].kind, "talk");
   assert.deepEqual(rows[0].talked, ["車いす"]);
+});
+
+test("番号の列だけを見分ける", () => {
+  for (const h of ["管理番号", "整理番号", "利用者番号", "被保険者番号", "利用者ID", "利用者コード", "No.", "マイナンバー"]) assert.equal(isOwnNumberColumn(h), true, h);
+  for (const h of ["電話番号", "緊急連絡先1電話", "携帯番号", "郵便番号", "部屋番号", "氏名", "避難方法", "IDEA"]) assert.equal(isOwnNumberColumn(h), false, h);
+});
+
+test("番号は計画書の値のまま出し、無ければ付けない。ケアプランの番号は移さない", () => {
+  const config = () => {
+    const imported = importRow({ headers: ["利用者番号", "名前"], row: ["K-777", "岡野 ハル"], mapping: { 名前: "self.name" } });
+    attachOutput(imported, { base: { blankValue: "未決定" }, columns: [{ header: "管理番号", target: "new" }, { header: "利用者番号", target: "self.name" }, { header: "氏名", target: "self.name" }] });
+    return imported;
+  };
+  const blank = config();
+  assert.equal(blank.output.targets.管理番号, "meta.serial");
+  assert.equal(blank.output.targets.利用者番号, "meta.serial");
+  const row = (imported) => buildVillageRow({ ...imported, config: imported.output, createdOn: "2026-11-03" });
+  assert.deepEqual(row(blank), ["", "", "岡野 ハル"]);
+  const kept = config();
+  mergeOutputRow(kept, { headers: ["管理番号", "利用者番号"], row: ["H-0012", "S-9"], targets: kept.output.targets });
+  assert.deepEqual(row(kept), ["H-0012", "S-9", "岡野 ハル"]);
+  const { rows } = describeFlows({ columns: [{ header: "利用者番号", target: "meta.serial" }], input: kept.input });
+  assert.equal(rows[0].kind, "keep");
+  assert.deepEqual(rows[0].from, []);
 });
 
 test("見本の計画書は岡野さんと𠮷川さんの行に当たり、見出しはハッカ村と同じ", async () => {

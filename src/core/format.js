@@ -34,7 +34,7 @@ export const BASE_FIELDS = [
 
 // 出口の列に入れられる内容
 export const OUTPUT_TARGETS = {
-  "meta.serial": "管理番号",
+  "meta.serial": "元の番号のまま（触らない）",
   "meta.createdOn": "作成日",
   "self.name": "本人の氏名",
   "self.kana": "本人のふりがな",
@@ -144,6 +144,13 @@ function customFor(imported, label) {
   return custom;
 }
 
+// 管理番号や利用者番号は、持ち主ごとに別のもの。つながず、変えず、新しく付けない。電話や郵便の番号は別に扱う
+export function isOwnNumberColumn(header) {
+  const text = String(header).normalize("NFKC");
+  if (/電話|TEL|携帯|FAX|郵便|〒|部屋|号室|連絡先/i.test(text)) return false;
+  return /番号|ナンバー|コード|(?:^|[^A-Za-z])(?:ID|No\.?)(?:$|[^A-Za-z])/i.test(text);
+}
+
 // 対応は見出しで持つので、同じ見出しが2つあると、別の人の値が出てしまう
 export function duplicateHeaders(headers) {
   const seen = new Set();
@@ -158,7 +165,8 @@ export function suspiciousHeaders(headers, { identity = {}, people = [] } = {}) 
 }
 
 // 確かめた出口の様式を計画につなぐ。計画に無い列は聞く欄として足す。両方の様式にある欄は1つにまとめる
-export function attachOutput(imported, { base = {}, name, columns }) {
+export function attachOutput(imported, { base = {}, name, columns: given }) {
+  const columns = given.map((c) => (isOwnNumberColumn(c.header) ? { ...c, target: "meta.serial" } : c));
   const repeated = duplicateHeaders(columns.map((c) => c.header));
   if (repeated.length > 0) throw new Error(`同じ見出しが2つあります：${repeated.join("、")}`);
   const targets = {};

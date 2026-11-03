@@ -189,8 +189,8 @@ export function moveField(plan, from, to, { previous = null, overwrite = false, 
 }
 
 // 続き用ファイル。本人を特定する情報を含むので、書き出した人の責任で扱う
-export function toResumeFile({ identity, plan, notes, people, customs = [], input = null, output = null, looseMemos = [], fromOutput = [], leftovers = [], serial }) {
-  return { kind: "hinan-hanashi-resume", version: 1, identity, plan, notes, people, customs, input, output, looseMemos, fromOutput, leftovers, serial };
+export function toResumeFile({ identity, plan, notes, people, customs = [], input = null, output = null, looseMemos = [], fromOutput = [], leftovers = [], ownNumbers = {} }) {
+  return { kind: "hinan-hanashi-resume", version: 1, identity, plan, notes, people, customs, input, output, looseMemos, fromOutput, leftovers, ownNumbers };
 }
 
 function mergeShape(base, loaded) {
@@ -222,6 +222,6 @@ export function fromResumeFile(data) {
     output: data.output ?? null,
     fromOutput: Array.isArray(data.fromOutput) ? data.fromOutput.filter((p) => typeof p === "string") : [],
     leftovers: Array.isArray(data.leftovers) ? data.leftovers.filter((l) => typeof l?.label === "string" && typeof l?.value === "string") : [],
-    serial: typeof data.serial === "string" ? data.serial : undefined,
+    ownNumbers: Object.fromEntries(Object.entries(data.ownNumbers ?? {}).filter(([, v]) => typeof v === "string")),
   };
 }

@@ -2,7 +2,7 @@
 import { decodeCsv, parseCsv } from "/core/csv.js";
 import { maskTable } from "/core/mask.js";
 import { findLeaks } from "/core/redact.js";
-import { attachOutput, checkResumedFormat, DEFAULT_TARGETS, duplicateHeaders, OUTPUT_TARGETS, suspiciousHeaders } from "/core/format.js";
+import { attachOutput, checkResumedFormat, DEFAULT_TARGETS, duplicateHeaders, isOwnNumberColumn, OUTPUT_TARGETS, suspiciousHeaders } from "/core/format.js";
 import { chooseConflict, describeFlows, findPersonRow, mergeOutputRow } from "/core/merge.js";
 import { fromResumeFile, importRow, serviceGaps } from "/core/plan.js";
 import { startTalk } from "/talk.js";
@@ -86,6 +86,7 @@ async function beginTalk(imported, options = {}) {
   }
   for (const id of ["step1", "step2", "step3", "step4", "step5", "manual"]) $(id).hidden = true;
   document.querySelector(".steps").hidden = true;
+  document.body.classList.remove("home");
   document.body.classList.add("wide-mode");
   document.querySelector(".top h1").textContent = "訪問";
   document.querySelector(".top p").textContent = "話を聞いて、段取りと次の一歩を決めます。決めるのはご本人です。";
@@ -101,6 +102,7 @@ function goTo(step) {
     mark.classList.toggle("done", i < step);
   }
   if (step !== 1) $("manual").hidden = true;
+  document.body.classList.toggle("home", step === 1);
   window.scrollTo(0, 0);
 }
 
@@ -320,9 +322,15 @@ function renderConfirm() {
     select.dataset.header = r.header;
     for (const [value, label] of Object.entries(TARGETS)) select.append(el("option", { value, textContent: label }));
     select.value = r.target in TARGETS ? r.target : "unknown";
+    // 番号は持ち主ごとに別のものなので、計画につながない
+    const ownNumber = isOwnNumberColumn(r.header);
+    if (ownNumber) {
+      select.value = "ignore";
+      select.disabled = true;
+    }
     const row = el("tr", { className: select.value === "unknown" ? "unknown" : "" },
       el("td", { textContent: r.header }),
-      el("td", {}, select),
+      el("td", {}, select, ...(ownNumber ? [el("small", { className: "own-number", textContent: "番号は触りません" })] : [])),
       el("td", { className: "local", textContent: rows[0]?.[col] ?? "" }));
     select.addEventListener("change", () => row.classList.toggle("unknown", select.value === "unknown"));
     table.append(row);
@@ -421,7 +429,7 @@ function renderFormat(columns) {
 }
 
 // 人が手で直した選択は、様式を読み直しても残す
-const currentColumns = () => (state.formatColumns ?? []).map(({ header, target }) => ({ header, target: state.formatEdits?.[header] ?? (target in OUTPUT_TARGETS ? target : "unknown") }));
+const currentColumns = () => (state.formatColumns ?? []).map(({ header, target }) => ({ header, target: isOwnNumberColumn(header) ? "meta.serial" : state.formatEdits?.[header] ?? (target in OUTPUT_TARGETS ? target : "unknown") }));
 
 function clearFlows() {
   state.formatColumns = [];
@@ -438,9 +446,10 @@ const FLOW_GROUPS = [
   ["talk", "訪問で聞いて渡す", "訪問で聞く"],
   ["hand", "手で入れて渡す", "手で入れる"],
   ["auto", "自動で入る", ""],
+  ["keep", "番号はそのまま（触りません）", ""],
   ["none", "空のまま出す", ""],
 ];
-const FLOW_PLAIN = { unknown: "入れる内容が分かりません", talk: "訪問で聞く", hand: "手元の情報に手で入れる", none: "入れません" };
+const FLOW_PLAIN = { unknown: "入れる内容が分かりません", talk: "訪問で聞く", hand: "手元の情報に手で入れる", none: "入れません", keep: "空のまま（番号は付けません）", auto: "作成した日" };
 
 // 渡す様式の見え方：元 → 渡す先。直すときだけ選択肢を開く
 function renderFlows() {
@@ -493,7 +502,8 @@ function flowRow(row) {
     moved?.closest(".flow-row").scrollIntoView({ block: "nearest" });
   });
   const edit = el("button", { className: "button mini", type: "button", textContent: "直す" });
-  edit.hidden = open;
+  // 番号の列は直せない。そのまま残すだけ
+  edit.hidden = open || (kind === "keep" && isOwnNumberColumn(header));
   edit.addEventListener("click", () => {
     state.formatOpen.add(header);
     select.hidden = false;
@@ -503,8 +513,8 @@ function flowRow(row) {
   const from = row.talked
     ? [el("span", { textContent: "訪問で聞いた値" }), el("span", { className: "value", textContent: row.talked.join("、") })]
     : row.from.length > 0
-      ? row.from.flatMap((c) => [el("span", { textContent: kind === "plan" ? "前の計画書" : c.header }), el("span", { className: "value", textContent: c.value })])
-      : [el("span", { className: "plain", textContent: kind === "auto" ? (target === "meta.serial" ? "仮の番号" : "作成した日") : FLOW_PLAIN[kind] })];
+      ? row.from.flatMap((c) => [el("span", { textContent: kind === "plan" ? "前の計画書" : kind === "keep" ? "計画書の番号" : c.header }), el("span", { className: "value", textContent: c.value })])
+      : [el("span", { className: "plain", textContent: FLOW_PLAIN[kind] })];
   return el("div", { className: "flow-row" },
     el("div", { className: "flow-from" }, ...from),
     el("span", { className: "flow-arrow", textContent: "→" }),
@@ -563,10 +573,11 @@ function renderMerge(merge) {
 
 async function confirmFormat() {
   showError($("formatError"), "");
-  const selects = [...$("formatTable").querySelectorAll("select")];
-  const unknown = selects.find((s) => s.value === "unknown");
+  // 画面は元ごとにまとめて見せるので、並びは画面からとらず、様式の順番のまま渡す
+  const columns = currentColumns();
+  const unknown = columns.find((c) => c.target === "unknown");
   if (unknown) {
-    showError($("formatError"), `「${unknown.dataset.header}」に入れる内容を選んでください。分からなければ「空のまま出す」を選べます。`);
+    showError($("formatError"), `「${unknown.header}」に入れる内容を選んでください。分からなければ「空のまま出す」を選べます。`);
     return;
   }
   const village = await loadVillage();
@@ -576,7 +587,7 @@ async function confirmFormat() {
   attachOutput(state.imported, {
     base: village,
     name: state.formatName,
-    columns: selects.map((s) => ({ header: s.dataset.header, target: s.value })),
+    columns,
   });
   const who = Number($("formatWho").value);
   const merge = data && who >= 0

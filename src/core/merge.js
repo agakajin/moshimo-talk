@@ -44,7 +44,7 @@ export function mergeOutputRow(imported, { headers, row, targets, blankValue = "
     const value = cleanValue(row[i], blankValue);
     if (!target || !value || target === "none" || target === "meta.createdOn") return;
     if (target === "meta.serial") {
-      imported.serial = value;
+      (imported.ownNumbers ??= {})[header] = value;
       return;
     }
     const helper = /^helper([12])\.(name|relation|phone)$/.exec(target);
@@ -121,6 +121,8 @@ export function describeFlows({ columns, input = null, plan = null, planHeaders 
     if (target === "meta.createdOn") return { header, target, kind: "auto", from: [] };
     const planAt = planHeaders.indexOf(header);
     const incoming = planRow && planAt >= 0 ? cleanValue(planRow[planAt], blankValue) : "";
+    // 番号はケアプランの値とつながない。計画書にあるものだけをそのまま残す
+    if (target === "meta.serial") return { header, target, kind: "keep", from: incoming ? [{ header, value: incoming }] : [] };
     const paths = expand(target);
     const from = (input?.headers ?? []).map((h, i) => ({ header: h, value: String(input.row[i] ?? "").trim(), target: input.mapping[h] }))
       .filter((c) => c.value && (paths.includes(c.target) || (target === "new" && c.header === header && c.target?.startsWith("extra."))))
@@ -128,7 +130,6 @@ export function describeFlows({ columns, input = null, plan = null, planHeaders 
     // 訪問の途中で聞いた値は、もとの CSV より新しい
     const talked = plan ? paths.map((p) => getAt(plan, p)).filter((f) => f?.status === "filled" && ["voice", "human"].includes(f.source)).map((f) => String(f.value)) : [];
     if (talked.length > 0) return { header, target, kind: "talk", from: [], talked };
-    if (target === "meta.serial" && !incoming) return { header, target, kind: "auto", from: [] };
     if (from.length > 0) {
       const differs = incoming && from.length === 1 && !sameValue(target, from[0].value, incoming) ? incoming : null;
       return { header, target, kind: "care", from, differs };

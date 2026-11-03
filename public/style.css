@@ -26,12 +26,14 @@ body {
 }
 
 .demo-banner { margin: 0; padding: 6px 24px; background: var(--ink); color: var(--paper); font-size: 13px; }
-.top { background: var(--paper); border-bottom: 1px solid var(--line); padding: 20px 24px; }
+.top { position: relative; background: var(--paper); border-bottom: 1px solid var(--line); padding: 20px 24px; }
 .top h1 { margin: 0; font-size: 22px; }
 .top p { margin: 4px 0 0; color: var(--muted); }
-/* 訪問の画面でだけ、見出しの右に出す */
-.top-actions { display: none; margin-left: auto; gap: 8px; }
-body:has(#talk:not([hidden])) .top-actions { display: flex; }
+/* 使い方はいつも見出しの右に出す。様式と訪問終了は訪問の画面でだけ */
+.top-actions { position: absolute; top: 20px; right: 24px; display: flex; gap: 8px; }
+body:not(:has(#talk:not([hidden]))) #changeFormat, body:not(:has(#talk:not([hidden]))) #goWrap { display: none; }
+body.wide-mode .top-actions { position: static; margin-left: auto; }
+.top-actions a.button { text-decoration: none; }
 body.wide-mode .top-actions .button { padding: 3px 14px; font-size: 14px; }
 body.wide-mode .top { align-items: center; }
 
@@ -228,9 +230,23 @@ button.chip.plain { cursor: pointer; }
 .consent-all .hint { margin: 0; }
 .consent-all .mini { padding: 2px 10px; font-size: 13px; }
 
+/* 最初のページ：何をする道具かを先に見せる。見出しの帯と進み具合は次の段階から出す */
+body:not(.home) #hero, body.home .top, body.home .steps { display: none; }
+.hero { position: relative; margin-bottom: 14px; padding: 18px 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+.hero h1 { margin: 0 96px 6px 0; font-size: 28px; line-height: 1.35; }
+.hero-howto { position: absolute; top: 18px; right: 24px; text-decoration: none; }
+.hero-lead { margin: 0 0 12px; font-size: 16px; }
+.hero-flow { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1.2fr); gap: 10px; align-items: stretch; }
+.hero-part { display: flex; flex-direction: column; gap: 4px; }
+.hero-verb { margin: 0; font-size: 15px; font-weight: 700; }
+.hero-chip { margin: 0; padding: 3px 12px; border: 1px solid var(--kind); border-radius: 6px; background: var(--kind-soft); color: var(--kind); font-size: 15px; font-weight: 600; }
+.hero-chip-tall { display: flex; flex: 1; align-items: center; justify-content: center; text-align: center; font-size: 16px; }
+.hero-arrow { display: flex; align-items: center; color: var(--muted); font-size: 24px; font-weight: 700; }
+.hero-note { margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+
 /* 最初のページ：つなぐ2つのデータを入れる */
 .slots { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; align-items: stretch; margin-top: 8px; }
-.slot { display: flex; flex-direction: column; min-height: 220px; border: 2px dashed var(--line); border-radius: 10px; padding: 16px 18px; background: var(--ground); transition: background .12s, border-color .12s; }
+.slot { display: flex; flex-direction: column; min-height: 170px; border: 2px dashed var(--line); border-radius: 10px; padding: 16px 18px; background: var(--ground); transition: background .12s, border-color .12s; }
 .panel .slot h3 { margin: 0 0 8px; font-size: 18px; }
 .slot.over { border-color: var(--accent); background: var(--accent-soft); }
 .slot.filled { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
@@ -250,7 +266,8 @@ button.chip.plain { cursor: pointer; }
 .kind-care { --kind: var(--accent); --kind-soft: var(--accent-soft); }
 .kind-plan { --kind: #2b5c9e; --kind-soft: #e6eef8; }
 .kind-talk { --kind: var(--warn); --kind-soft: var(--warn-soft); }
-.kind-hand, .kind-auto, .kind-none { --kind: var(--muted); --kind-soft: var(--ground); }
+.kind-hand, .kind-auto, .kind-keep, .kind-none { --kind: var(--muted); --kind-soft: var(--ground); }
+.own-number { display: block; color: var(--muted); font-size: 13px; }
 .kind-unknown { --kind: var(--error); --kind-soft: var(--error-soft); }
 .flow-summary { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 4px 0 14px; }
 .flow-source { display: flex; flex-direction: column; justify-content: center; min-width: 8.5em; padding: 6px 12px; border: 1px solid var(--kind); border-radius: 8px; background: var(--kind-soft); color: var(--kind); font-size: 14px; line-height: 1.4; }
@@ -272,6 +289,26 @@ button.chip.plain { cursor: pointer; }
 .flow-row .mini { padding: 1px 8px; font-size: 13px; }
 .flow-row select { grid-column: 1 / -1; width: 100%; }
 .flow-differs { grid-column: 1 / -1; color: var(--warn); font-size: 14px; }
+
+/* 使い方のページ */
+.guide { max-width: 880px; }
+.guide h3 { margin-top: 22px !important; }
+.guide ul, .guide ol { padding-left: 22px; }
+.guide li { margin-bottom: 4px; }
+.guide-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 10px 0 14px; padding: 0 !important; list-style: none; counter-reset: guide; }
+.guide-flow li { counter-increment: guide; margin: 0; padding: 10px 14px; border-radius: 8px; background: var(--accent-soft); color: var(--ink); font-size: 14px; }
+.guide-flow b { display: block; color: var(--accent); font-size: 18px; }
+.guide-flow b::before { content: counter(guide) ". "; }
+.guide-note { padding: 8px 12px; border-left: 4px solid var(--accent); border-radius: 6px; background: var(--ground); font-size: 15px; }
+.guide-nav { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 15px; }
+.guide a:not(.button) { color: var(--accent); }
+.guide-scene { margin: 10px 0 12px; }
+.guide-scene .slot { min-height: 120px; }
+.guide-table { margin: 10px 0 12px; }
+.guide-table td:first-child { font-weight: 600; white-space: nowrap; }
+.guide-faq { display: block; }
+.guide-faq dt { margin-top: 14px; color: var(--ink); font-size: 16px; font-weight: 600; }
+.guide-faq dd { margin: 2px 0 0; }
 
 .merge-box { margin: 12px 0 8px; padding: 12px 16px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent-soft); }
 .panel .merge-box h3 { margin: 0 0 6px; }

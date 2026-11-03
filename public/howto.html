@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>使い方：個別避難計画づくり</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <p class="demo-banner">架空データ専用のデモです。本物の利用者データは入れないでください。</p>
+  <header class="top">
+    <h1>使い方</h1>
+    <p>ケアプランと個別避難計画書をつなぎ、同じことを二度聞かずに計画を作る道具です。</p>
+    <div class="top-actions">
+      <a class="button" href="/" target="_blank" rel="noopener">道具を開く</a>
+    </div>
+  </header>
+
+  <main class="guide">
+    <section class="panel">
+      <h2>流れは3つです</h2>
+      <ol class="guide-flow">
+        <li><b>入れる</b>2つのデータをつなぐ</li>
+        <li><b>話す</b>足りないことだけ聞く</li>
+        <li><b>渡す</b>本人、市、ケアプランへ</li>
+      </ol>
+      <p class="guide-note">計画を決めるのは、ご本人とご家族、支援する人です。この道具は、聞いたことを書き取り、足りないところを知らせるだけです。医療の判断はしません。ご本人や手伝う人に連絡もしません。</p>
+      <nav class="guide-nav" aria-label="このページの中">
+        <a href="#ready">始める前に</a>
+        <a href="#put">1. 入れる</a>
+        <a href="#talk">2. 話す</a>
+        <a href="#give">3. 渡す</a>
+        <a href="#privacy">送るもの、送らないもの</a>
+        <a href="#trouble">困ったとき</a>
+      </nav>
+    </section>
+
+    <section id="ready" class="panel">
+      <h2>始める前に</h2>
+      <ul>
+        <li><b>パソコンの Chrome か Edge</b> で開きます。スマホでは、まだ確かめていません。</li>
+        <li>声メモを使うときは、ブラウザにマイクの使用を許可します。声が使えなくても、文字で入れられます。</li>
+        <li>はじめての方は、最初の画面の「見本」で試せます。見本の方は架空の人です。公開版で使えるのは見本だけです。</li>
+      </ul>
+    </section>
+
+    <section id="put" class="panel">
+      <h2>1. 入れる</h2>
+      <h3>データを2つ入れて、「つないで進む」を押します</h3>
+      <p>左にケアプラン、右に個別避難計画書の CSV を、ドラッグするか「ファイルを選ぶ」で入れます。この時点では、どこにも送りません。</p>
+      <div class="guide-scene slots" aria-hidden="true">
+        <div class="slot filled"><h3>ケアプラン</h3><p class="slot-name">ケアプラン.csv</p><p class="slot-info hint">1件、19列</p></div>
+        <div class="slot-link"><span class="button">⇄</span></div>
+        <div class="slot"><h3>個別避難計画書</h3><p class="slot-drop">CSV をここにドラッグ</p></div>
+      </div>
+      <ul>
+        <li><b>片方だけでも始められます。</b>計画書がまだ無ければ、ケアプランだけで進みます。</li>
+        <li>左右を逆に入れたときは「⇄」で入れ替えます。</li>
+        <li>CSV が無いときは「CSV なしで始める」で手入力します。前回の続きは「続きから」で読み込みます。</li>
+      </ul>
+
+      <h3>読み取りを確かめます</h3>
+      <ol>
+        <li><b>送る中身を見る：</b>Claude に送るのは列の見出しと記号だけです。本物の値は「文字列1」のような記号に置き換わっています。</li>
+        <li><b>列を確かめる：</b>Claude が読んだ「この列は何か」が合っているかを見ます。違っていれば選び直します。</li>
+        <li><b>渡す様式を選ぶ：</b>どの値がどの列へ渡るかを見ます。</li>
+      </ol>
+      <div class="guide-scene" aria-hidden="true">
+        <div class="flow-list">
+          <div class="kind-care flow-row"><div class="flow-from"><span>利用者名</span><span class="value">岡野 ハル</span></div><span class="flow-arrow">→</span><div class="flow-to">氏名</div><span class="button mini">直す</span></div>
+          <div class="kind-plan flow-row"><div class="flow-from"><span>前の計画書</span><span class="value">ミドリ区自治会</span></div><span class="flow-arrow">→</span><div class="flow-to">自治会名</div><span class="button mini">直す</span></div>
+          <div class="kind-talk flow-row"><div class="flow-from"><span class="plain">訪問で聞く</span></div><span class="flow-arrow">→</span><div class="flow-to">避難場所</div><span class="button mini">直す</span></div>
+        </div>
+      </div>
+      <p>緑はケアプランから、青は前の計画書から、オレンジは訪問で聞くものです。合っていなければ「直す」を押します。</p>
+      <p>管理番号や利用者番号は、持ち主ごとに別のものなので触りません。ケアプランの番号を計画書へ移さず、計画書にある番号はそのまま残し、新しく付けることもしません。</p>
+
+      <h3>2つの値が違うときは、人が選びます</h3>
+      <p>たとえばケアプランが「要介護1」、計画書が「要支援2」なら、「話すこと」の画面でどちらを使うかを選びます。道具が黙って決めることはありません。別の方の行も、名前と生年月日が合わなければ入りません。</p>
+    </section>
+
+    <section id="talk" class="panel">
+      <h2>2. 話す</h2>
+      <h3>左上の問いから、会話を始めます</h3>
+      <p>分かっていることは聞かず、足りないことへ進む問いが出ます。読み上げなくて大丈夫です。話のきっかけにしてください。聞きにくいときは「今は聞けない」で次へ進みます。</p>
+
+      <h3>声メモで書き取ります</h3>
+      <ol>
+        <li><b>長く押している間に、ご本人の話を復唱します。</b>「裏の部屋でお休みなんですね」のように、確かめるつもりで言います。キーでは F2 が同じ働きです。</li>
+        <li><b>文字を確かめます。</b>間違いは、その場で直せます。声を使わず、ここに打ち込んでもかまいません。</li>
+        <li><b>短く押すと、計画に入ります。</b>入った欄には色が付きます。</li>
+      </ol>
+      <p class="guide-note">名前は言わず、「娘さん」「隣の人」のように話してください。話に出た方の名前は、「話に出た人の名前」に入れておくと、送る前に呼び名へ置き換わります。</p>
+
+      <h3>右の計画を見ながら進めます</h3>
+      <ul>
+        <li><b>赤い欄</b>は、渡す様式で必須なのにまだ空いている欄です。全部を今日埋めなくても大丈夫です。</li>
+        <li><b>入った欄が違うとき</b>は「移す」で別の欄へ移します。どの欄も手で直せて、人が直した欄は AI が上書きしません。</li>
+        <li><b>欄に入らなかった声メモ</b>は、計画の欄へドラッグして入れます。</li>
+        <li><b>手伝う人</b>は、実際に頼めたら人が「頼めた」に印を付けます。前の計画書に名前があっても、今も頼めるかを確かめてください。</li>
+      </ul>
+      <p>話が進むと、左に「気になること」と「小さな頼みごと」が出ます。まず1つ選べば十分です。話し終えたら、右上の「訪問終了」を押します。</p>
+    </section>
+
+    <section id="give" class="panel">
+      <h2>3. 渡す</h2>
+      <p>訪問終了の画面で、相手ごとに渡すものを作ります。</p>
+      <table class="guide-table">
+        <tr><th>渡す相手</th><th>渡すもの</th><th>すること</th></tr>
+        <tr><td>ご本人</td><td>本人の1枚</td><td>「印刷する」を押します。手伝う人が決まっていなくても渡せます。</td></tr>
+        <tr><td>市</td><td>個別避難計画書の CSV</td><td>同意を項目ごとに記録し、内容を読んでから保存します。同意した項目だけが出ます。</td></tr>
+        <tr><td>ケアプラン</td><td>ケアプラン用の CSV</td><td>戻してよいかを別に記録して保存します。元のファイルは変わりません。</td></tr>
+      </table>
+      <p class="guide-note">同意は紙で確かめ、この画面には結果だけを記録します。実際の同意の取り方と渡し方は、市の条例と法律の確認が必要です。</p>
+      <p>続きを別の日にするときは「続き用ファイルを保存」を押します。<b>画面を閉じると内容は消えます。</b>続き用ファイルには名前や連絡先、体のことが入るので、保存した人の責任で扱ってください。</p>
+    </section>
+
+    <section id="privacy" class="panel">
+      <h2>送るもの、送らないもの</h2>
+      <table class="guide-table">
+        <tr><th>相手</th><th>送るもの</th></tr>
+        <tr><td>Claude</td><td>列の見出しと記号。声メモの文字。計画の欄の内容（歩き方、避難先など）。どれも、分かっている名前や番号を呼び名に置き換えてから送ります。</td></tr>
+        <tr><td>Google</td><td>マイクを押している間の声。ブラウザの音声認識に使います。</td></tr>
+      </table>
+      <p><b>Claude に送らないもの：</b>本人の氏名、ふりがな、住所、電話、生年月日、緊急連絡先、備考、「話に出た人の名前」に入れた名前。</p>
+      <p class="guide-note">入れていない名前は置き換えられません。声メモでは名前を言わないようにしてください。「Claude に送った中身を見る」で、実際に送った内容を確かめられます。</p>
+    </section>
+
+    <section id="trouble" class="panel">
+      <h2>困ったとき</h2>
+      <dl class="guide-faq">
+        <dt>声が入りません</dt>
+        <dd>ブラウザのマイクの許可を確かめてください。使えないときは、声メモの欄に文字で入れられます。</dd>
+        <dt>読み込めないと出ます</dt>
+        <dd>画面に理由が出ます。同じ見出しが2つある、値の中のカンマで列がずれている、などです。CSV を直してから入れ直してください。</dd>
+        <dt>計画書の値が入りません</dt>
+        <dd>ケアプランの方と名前や生年月日が合わないと入りません。同じ方なら、渡す様式の画面で「どの方の値を入れますか」から選びます。別の様式に切り替えたときも、計画書の値は入りません。</dd>
+        <dt>途中で様式を変えたい</dt>
+        <dd>訪問の画面の右上「様式を変える」で変えられます。話した内容は残ります。渡す相手が変わるので、同意は聞き直しになります。</dd>
+      </dl>
+    </section>
+  </main>
+</body>
+</html>
