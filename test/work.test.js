@@ -69,6 +69,6 @@ test("𠮷川さんの点検：階段と持ち出しに当たり、岡野さん�
   const findings = mockCheck({ plan, gaps: null, targetMinutes: 60, yardstick: yard });
   const text = JSON.stringify(findings);
   assert.ok(findings.some((f) => f.yardstick === "持ち出し" && /ボンベ/.test(f.text)));
-  assert.ok(findings.some((f) => f.request === "同じ建物の方に、あいさつを一度"));
+  assert.ok(findings.some((f) => f.request === "もしものときに、声をかけてもらえませんか（同じ建物の方へ）"));
   assert.ok(!/石段|隣の人|固定電話/.test(text), text);
 });

@@ -49,19 +49,19 @@ export function mockCheck({ plan, gaps, targetMinutes, yardstick }) {
   }
   if (filled(plan.evacuation.route)) {
     const steps = /石段/.test(plan.home.hazardNote?.value ?? "") ? "石段" : "階段";
-    add("slope-request", yardstick?.label ?? "坂・階段", "階段を一人で降りられないようです。", plan.helpers.length || steps === "石段" ? { request: `${steps}を降りるときだけ、手を貸してください` } : {});
+    add("slope-request", yardstick?.label ?? "坂・階段", "階段を一人で降りられないようです。", plan.helpers.length || steps === "石段" ? { request: `${steps}を降りるときだけ、手を貸してもらえませんか` } : {});
   }
   if (plan.contactMeans.value === "固定電話のみ") {
-    add("single-contact", "一本足", "知らせを受ける手段が固定電話だけです。", plan.helpers.length ? { request: "雨の夜に、電話を1本" } : {});
+    add("single-contact", "一本足", "知らせを受ける手段が固定電話だけです。", plan.helpers.length ? { request: "大雨のときに、電話を1本もらえませんか" } : {});
   }
   if (gaps?.length && plan.helpers.some((h) => h.awayWeekdayDaytime)) {
-    add("daytime-gap", "時間帯", `${gaps.join("・")}の昼は、隣の人がいません。`, { request: "雨の予報の日の昼に、電話を1本（娘さんへ）" });
+    add("daytime-gap", "時間帯", `${gaps.join("・")}の昼は、隣の人がいません。`, { request: "雨の予報の日の昼に、電話を1本もらえませんか（娘さんへ）" });
   }
   if (/酸素/.test(plan.considerations.items.value ?? "") && !filled(plan.carry)) {
     add("carry-power", "持ち出し", "酸素の電源とボンベを持って出る段取りを、まだ聞けていません。");
   }
   if (/住宅|建物/.test(plan.evacuation.route.value ?? "") && plan.helpers.length === 0) {
-    add("no-helper", "最低ライン", "手伝う人はまだ決まっていません。今日決めなくて大丈夫です。", { request: "同じ建物の方に、あいさつを一度" });
+    add("no-helper", "最低ライン", "手伝う人はまだ決まっていません。今日決めなくて大丈夫です。", { request: "もしものときに、声をかけてもらえませんか（同じ建物の方へ）" });
   }
   const prep = parseMinutes(plan.evacuation.prepMinutes.value);
   const move = parseMinutes(plan.evacuation.moveMinutes.value);

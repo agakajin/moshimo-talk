@@ -69,9 +69,10 @@ test("最後は頼みごとの案が出て、言ってはいけない指摘は�
   MEMOS.forEach((m, i) => applyUpdates(plan, mockScribe(m), i + 1));
   const findings = check(plan);
   const requests = findings.filter((f) => f.request).map((f) => f.request);
-  assert.ok(requests.includes("雨の夜に、電話を1本"));
-  assert.ok(requests.includes("石段を降りるときだけ、手を貸してください"));
+  assert.ok(requests.includes("大雨のときに、電話を1本もらえませんか"));
+  assert.ok(requests.includes("石段を降りるときだけ、手を貸してもらえませんか"));
   assert.ok(requests.some((r) => r.includes("昼に、電話を1本")));
+  assert.ok(requests.every((r) => /もらえませんか(（[^）]*）)?$/.test(r)), "そのまま言える言い回し");
   assert.ok(!findings.some((f) => f.interrupt));
   assert.ok(!findings.some((f) => f.id === "in-time"), "45分は目安の中");
   const text = findings.map((f) => f.text).join();

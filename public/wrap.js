@@ -48,7 +48,7 @@ export function startWrap(state, findings, config) {
         plan.requestsDone = box.checked ? [...plan.requestsDone, r] : plan.requestsDone.filter((x) => x !== r);
         renderSummary();
       });
-      return el("label", { className: "request" }, box, el("span", { textContent: `${r} を頼めた` }));
+      return el("label", { className: "request" }, box, el("span", { textContent: `「${r}」と頼めた` }));
     }));
   }
 
