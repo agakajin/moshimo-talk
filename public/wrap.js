@@ -52,6 +52,25 @@ export function startWrap(state, findings, config) {
     }));
   }
 
+  // 頼みごとの案は、本人に渡す1枚を作るここで選ぶ。点検の文が変わっても、選んだものは一覧に残して外せるようにする
+  function renderRequests() {
+    const current = state.findings?.() ?? findings;
+    const options = [...new Set([...plan.requests, ...current.filter((f) => f.request).map((f) => f.request)])];
+    $("requestBox").hidden = options.length === 0;
+    $("requests").replaceChildren(...options.map((request) => {
+      const chosen = plan.requests.includes(request);
+      const box = el("input", { type: "checkbox", checked: chosen });
+      box.addEventListener("change", () => {
+        plan.requests = box.checked ? [...plan.requests, request] : plan.requests.filter((r) => r !== request);
+        if (!box.checked) plan.requestsDone = plan.requestsDone.filter((r) => r !== request);
+        renderRequests();
+        renderSummary();
+        renderSheet();
+      });
+      return el("label", { className: `request ${chosen ? "chosen" : ""}` }, box, el("span", {}, request, el("small", { textContent: REQUEST_NOTE })));
+    }));
+  }
+
   // 同意をまとめて変える。項目ごとの欄と同じ値を入れるだけなので、あとから1つずつ直せる
   function renderBulk(id, options, groups, store, after) {
     $(id).replaceChildren(el("span", { className: "hint", textContent: "まとめて変える：" }), ...options.map(([value, label]) => {
@@ -171,6 +190,7 @@ export function startWrap(state, findings, config) {
   state.refreshWrap = () => {
     if ($("wrap").hidden) return;
     renderSummary();
+    renderRequests();
     renderSheet();
     renderCsvPreview();
     renderOutside();
@@ -179,6 +199,7 @@ export function startWrap(state, findings, config) {
   };
   $("outputTitle").textContent = `${config.name ?? "市"}に渡す個別避難計画書`;
   renderSummary();
+  renderRequests();
   renderConsent();
   renderSheet();
   renderCsvPreview();

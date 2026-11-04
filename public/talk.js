@@ -4,7 +4,7 @@ import { blankColumns, planFieldList, requiredBlanks } from "/core/format.js";
 import { pendingRechecks } from "/core/merge.js";
 import { parseMinutes } from "/core/normalize.js";
 import { findLeaks, redact, redactDeep } from "/core/redact.js";
-import { nextTopic, REQUEST_NOTE } from "/core/talk.js";
+import { nextTopic } from "/core/talk.js";
 import { chooseKey, createPushToTalk, DEFAULT_KEY, keyCode, keyLabel, keyTriggers } from "/core/voice.js";
 import { createLatest, createQueue } from "/core/work.js";
 import { startWrap } from "/wrap.js";
@@ -536,25 +536,7 @@ export function startTalk(state, { script = null } = {}) {
     if (rows.length !== box.children.length || rows.some((r, i) => box.children[i] !== r)) box.replaceChildren(...rows);
   }
 
-  function renderRequests() {
-    // 点検の文が変わっても、選んだものは一覧に残して外せるようにする
-    const options = [...new Set([...plan.requests, ...findings.filter((f) => f.request).map((f) => f.request)])].map((request) => ({ request }));
-    if (options.length === 0) {
-      $("requests").replaceChildren(el("p", { className: "hint", textContent: "話が進むと、ここに案が出ます。" }));
-    } else {
-      $("requests").replaceChildren(...options.map((f) => {
-        const chosen = plan.requests.includes(f.request);
-        const box = el("input", { type: "checkbox", checked: chosen });
-        const label = el("label", { className: `request ${chosen ? "chosen" : ""}` }, box,
-          el("span", {}, f.request, el("small", { textContent: REQUEST_NOTE })));
-        box.addEventListener("change", () => {
-          plan.requests = box.checked ? [...plan.requests, f.request] : plan.requests.filter((r) => r !== f.request);
-          if (!box.checked) plan.requestsDone = plan.requestsDone.filter((r) => r !== f.request);
-          renderRequests();
-        });
-        return label;
-      }));
-    }
+  function renderFindings() {
     $("findings").replaceChildren(...(checkError
       ? [el("li", { className: "notice", textContent: checkError })]
       : findings.length
@@ -568,7 +550,7 @@ export function startTalk(state, { script = null } = {}) {
     renderOpener();
     renderWeek();
     renderPlan();
-    renderRequests();
+    renderFindings();
   }
 
   function showSent(label, body) {
@@ -606,7 +588,7 @@ export function startTalk(state, { script = null } = {}) {
     state.checking = true;
     renderWork();
     state.refreshWrap?.();
-    renderRequests();
+    renderFindings();
     try {
       const body = guarded({ plan: planToSend(), gaps, blanks: blankColumns(state.output, plan), fields: extraFields() });
       showSent("点検役へ", body);
@@ -633,7 +615,7 @@ export function startTalk(state, { script = null } = {}) {
       state.refreshWrap?.();
     }
     renderOpener();
-    renderRequests();
+    renderFindings();
   }
 
   let micTalk = null;

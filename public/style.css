@@ -179,6 +179,7 @@ textarea, .plan-input { width: 100%; font: inherit; padding: 6px 8px; border: 1p
 td.waiting { background: var(--warn-soft); color: var(--warn); }
 #memos { font-size: 14px; padding-left: 20px; margin: 12px 0 0; }
 .request { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; cursor: pointer; }
+.request-box { margin-bottom: 14px; }
 .request.chosen { background: var(--accent-soft); border-color: var(--accent); }
 .request small { display: block; color: var(--muted); }
 .plan-input.short { width: auto; flex: 1 1 8em; min-width: 0; }
