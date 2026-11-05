@@ -103,7 +103,7 @@ node --env-file=.env scripts/try-claude.mjs --go
 ```
 
 ## 外に置くとき
-`HOST=0.0.0.0` と、12文字以上の `APP_PASSWORD` が必要です。無いと起動しません。`PUBLIC_DEMO=1` で架空のサンプルだけになります。公開デモのサーバーは、架空のサンプル以外の列を読みません。回数の上限は `LIMIT_PER_MINUTE`（既定40）、`LIMIT_PER_DAY`（既定500）、`LIMIT_PER_CLIENT_DAY`（接続元ごと、既定200）です。
+`HOST=0.0.0.0` と、12文字以上の `APP_PASSWORD` が必要です。無いと起動しません。`PUBLIC_DEMO=1` では、CSV は入れられますが、架空のデータだけを入れるよう画面で伝え、続きから再開と手入力の入口を隠します。入れた値はブラウザの中だけで、サーバーは見出しと記号だけを受け取ります。回数の上限は `LIMIT_PER_MINUTE`（既定40）、`LIMIT_PER_DAY`（既定500）、`LIMIT_PER_CLIENT_DAY`（接続元ごと、既定200）です。
 
 ## Claude Code での作り方
 - [フック](.claude/settings.json)：書き換えるたびにテストを流す。鍵の読み出し、公開への切り替え、履歴の上書きを止める。有料の実行は人に聞く

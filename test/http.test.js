@@ -149,13 +149,15 @@ test("鍵が無ければ仮の答えと分かる", async (t) => {
   assert.equal((await res.json()).mode, "mock");
 });
 
-test("公開デモでは、サーバーでもサンプル以外の列を断り、長い声メモも断る", async (t) => {
+test("公開デモでも見本以外の見出しを読め、値らしい見出しと長い声メモは断る", async (t) => {
   const { child, ready } = run({ HOST: "127.0.0.1", APP_PASSWORD: "", PUBLIC_DEMO: "1" });
   t.after(() => child.kill());
   const base = `http://127.0.0.1:${await ready}`;
   const send = (columns) => fetch(`${base}/api/read-columns`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ columns }) });
   assert.equal((await send([{ header: "利用者名", withheld: false, samples: ["文字列1"] }])).status, 200);
-  assert.equal((await send([{ header: "本物の台帳の列", withheld: false, samples: ["文字列1"] }])).status, 422);
+  assert.equal((await send([{ header: "手元の台帳の列", withheld: false, samples: ["文字列1"] }])).status, 200);
+  assert.equal((await send([{ header: "000-11-2222", withheld: false, samples: ["文字列1"] }])).status, 422);
+  assert.equal((await send([{ header: "手元の台帳の列", withheld: false, samples: ["本物の値"] }])).status, 422);
   const long = await fetch(`${base}/api/scribe`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ memo: "あ".repeat(3001), plan: {} }) });
   assert.equal(long.status, 422);
 });

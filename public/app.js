@@ -153,10 +153,6 @@ function renderSlots() {
 
 async function takeFiles(key, files) {
   await configReady;
-  if (state.publicDemo) {
-    showError($("fileError"), "公開版では実在のデータが入らないよう、架空の見本だけ使えます。");
-    return;
-  }
   const other = key === "care" ? "plan" : "care";
   const list = [...files].slice(0, 2);
   const wrong = list.find((f) => !/\.csv$/i.test(f.name));
@@ -1091,14 +1087,10 @@ document.querySelectorAll("[data-quick]").forEach((b) => b.addEventListener("cli
 }));
 const configReady = fetch("/api/config").then((r) => r.json()).then(({ publicDemo }) => {
   if (!publicDemo) return;
-  // 公開デモでは実在のデータが入らないよう、架空のサンプルだけにする
-  state.publicDemo = true;
-  $("file").closest("label").hidden = true;
-  $("planFile").closest("label").hidden = true;
+  // 公開デモでも CSV は入れられる。値はブラウザの中だけなので、架空のデータを入れてもらうよう入口で伝える
   $("resume").closest("label").hidden = true;
-  $("formatFile").closest("label").hidden = true;
   $("manualStart").hidden = true;
-  document.querySelectorAll(".slot-drop").forEach((p) => { p.textContent = "公開版は架空の見本だけ使えます"; });
+  document.querySelectorAll(".slot-drop").forEach((p) => { p.textContent = "架空のデータの CSV をここにドラッグ"; });
 }).catch(() => {});
 renderSlots();
 goTo(1);
