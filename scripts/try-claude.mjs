@@ -14,7 +14,7 @@ const MAPPING = JSON.parse(read("keahakka.mapping.json"));
 const PRICE = { input: 4, output: 20 }; // Opus 5.5、100万トークンあたりのドル
 
 const OKANO_MEMOS = [
-  "家の裏の部屋で寝ている。裏は崖で、大雨のときが心配。ほかの災害は心配していないとのこと",
+  "家の奥の部屋で寝ている。裏は崖で、大雨のときが心配。ほかの災害は心配していないとのこと",
   "公民館。前にも行ったことがある",
   "長い距離は車いす",
   "一人では降りられない。誰かに手を引いてもらえば、杖で一段ずつ。車いすは階段の下に置いておく。準備に15分、公民館まで30分くらい",
@@ -33,7 +33,7 @@ const OFF_SCRIPT_MEMOS = [
 
 // 確かめながら復唱した言い方。問いかけは書き込まない
 const RECAP_MEMOS = [
-  "裏の部屋でお休みなんですね。大雨のときの崖が心配、ということですね",
+  "奥の部屋でお休みなんですね。大雨のときの崖が心配、ということですね",
   "逃げるなら公民館、ということでよろしいですね",
   "手伝ってくれる方は、どなたかいらっしゃいますか",
   "お隣の方とはあいさつをされるけれど、避難のことはまだ頼んでいない、ということですね",
@@ -115,7 +115,7 @@ expect(otherAll !== all, "岡野さんと違う指摘になった");
 
 console.log("\n【復唱の言い方】");
 const recap = await talk(RECAP_MEMOS);
-expect(/裏/.test(recap.plan.home.bedroom.value ?? ""), "寝室が裏の部屋");
+expect(/奥/.test(recap.plan.home.bedroom.value ?? ""), "寝室が奥の部屋");
 expect(/公民館/.test(recap.plan.evacuation.place.value ?? ""), "逃げる先が公民館");
 expect(recap.plan.helpers.length === 1 && recap.plan.helpers[0].asked === false, "問いかけからは人を足さず、隣の人はまだ頼んでいない", JSON.stringify(recap.plan.helpers));
 

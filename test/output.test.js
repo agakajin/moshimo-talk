@@ -24,7 +24,7 @@ test("国の項目に合わせた列が計画に入る", () => {
   const { plan } = okano();
   assert.equal(plan.care.stairs.source, "csv");
   assert.equal(plan.home.usualRoom.value, "居間");
-  assert.equal(plan.home.bedroom.value, "家の裏の部屋");
+  assert.equal(plan.home.bedroom.value, "家の奥の部屋");
 });
 
 test("同意がなければ市向けに出せず、同意した項目だけが出る", () => {

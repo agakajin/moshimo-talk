@@ -9,7 +9,7 @@ import { mockCheck, mockScribe } from "../src/server/mock-talk.js";
 import { validateCheckPayload, validateScribePayload } from "../src/server/validate.js";
 
 const MEMOS = [
-  "家の裏の部屋で寝ている。裏は崖で、大雨のときが心配。ほかの災害は心配していないとのこと",
+  "家の奥の部屋で寝ている。裏は崖で、大雨のときが心配。ほかの災害は心配していないとのこと",
   "公民館。前にも行ったことがある",
   "長い距離は車いす",
   "一人では降りられない。誰かに手を引いてもらえば、杖で一段ずつ。車いすは階段の下に置いておく。準備に15分、公民館まで30分くらい",
@@ -36,7 +36,7 @@ test("火・木の話から入れる順で、きっかけが1つずつ出る", (
 
 test("寝室が分かっていれば聞き直さない", () => {
   const { plan } = okano();
-  assert.match(nextTopic(plan, {}).text, /家の裏の部屋で寝ていらっしゃる/);
+  assert.match(nextTopic(plan, {}).text, /家の奥の部屋で寝ていらっしゃる/);
   plan.home.bedroom.value = null;
   assert.equal(nextTopic(plan, {}).text, "もしものときに、心配なことはありますか？");
 });
