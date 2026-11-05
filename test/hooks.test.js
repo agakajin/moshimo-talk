@@ -12,7 +12,7 @@ test("取り返しのつかないコマンドを止める", () => {
     "cat .env",
     "type D:\\hackathon\\hinan-hanashi\\.env",
     "Get-Content .env",
-    "gh repo edit agakajin/hinan-hanashi --visibility public --accept-visibility-change-consequences",
+    "gh repo edit agakajin/moshimo-talk --visibility public --accept-visibility-change-consequences",
     "git push --force origin main",
     "git commit --no-verify -m x",
     'echo "$ANTHROPIC_API_KEY"',
