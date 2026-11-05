@@ -80,7 +80,7 @@ test("今日できたことと次の一歩が残る", () => {
   assert.ok(!next.some((n) => n.includes("雨の夜")), "頼めたものは次に出さない");
 });
 
-test("手伝う人が空でも、本人の1枚ができる", () => {
+test("手伝う人が空でも、ご本人に共有する紙ができる", () => {
   const state = okano();
   const sheet = buildOneSheet(state);
   const rows = Object.fromEntries(sheet.rows);

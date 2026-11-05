@@ -84,7 +84,7 @@ test("欄に印が付く。両方にある欄は1つで、避難計画に入る�
   assert.equal(of("避難場所").mark, "避難計画書のみ");
   assert.equal(fields.filter((f) => f.path === "home.bedroom").length, 1);
   assert.equal(of("知らせの受け方").mark, "様式の外");
-  assert.equal(of("持ち出し").mark, "本人の1枚");
+  assert.equal(of("持ち出し").mark, "共有する紙");
   const rank = (mark) => fields.findIndex((f) => f.mark === mark);
   assert.ok(rank("避難計画書のみ") < rank("様式の外"));
 });

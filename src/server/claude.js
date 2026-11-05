@@ -87,7 +87,7 @@ function sentenceOf(quote, memo) {
 // 呼び名の中心の言葉が、根拠の文に出ていること。「娘に頼んだ」を根拠に息子さんを入れない
 const sameNeighbor = (text) => text.replace(/となり/g, "隣");
 const namesPerson = (alias, quote) => sameNeighbor(squeeze(quote)).includes(sameNeighbor(alias.match(RELATION)?.[0] ?? squeeze(alias)));
-// 置き換えの記号のまま計画に入れると、本人の1枚と市向けの CSV に記号が出る
+// 置き換えの記号のまま計画に入れると、ご本人に共有する紙と市向けの CSV に記号が出る
 const PLACEHOLDER = /\[(?:お名前|住所|日付|電話番号|郵便番号|手元の値|メール)\]|手元にあります/;
 // 答えをまだ聞いていない問いかけは、根拠にしない。文の終わりで見るので、引用から「か」を抜いても通らない
 // 「公民館ですかね」は考えながらの復唱でもあるので、ここでは捨てず Claude の判断と人の確認に任せる
@@ -139,7 +139,7 @@ export function acceptScribe({ updates, helpers }, memo, fields = [], plan = {})
   let unnamed = 0;
   for (const { alias, awayWeekdayDaytime, asked, quote } of helpers) {
     if (!isQuoted(quote, memo) || isAsking(quote, memo) || alias.trim() === "" || personalKind(alias) || PLACEHOLDER.test(alias) || !namesPerson(alias, quote)) continue;
-    // 頼んだかどうかは本人の1枚と CSV に直結するので、その人の文だけで確かめる
+    // 頼んだかどうかは、ご本人に共有する紙と CSV に直結するので、その人の文だけで確かめる
     const sentence = sentenceOf(quote, memo);
     // 「娘に頼みました、隣の人には来週話します」で隣の人を頼めたにしない。その人を含む節だけで見る
     const clause = sentence.split(/[、,，]/).find((part) => namesPerson(alias, part)) ?? sentence;
@@ -174,7 +174,7 @@ export function acceptFindings(findings, yardsticks) {
     seen.set(base, n);
     const finding = { id: n === 1 ? base : `${base}-${n}`, yardstick: f.yardstick, text: f.text };
     if (interrupt) Object.assign(finding, { interrupt: true, opener: f.opener });
-    // 「手伝います」のような約束は、本人の1枚に載せない
+    // 「手伝います」のような約束は、ご本人に共有する紙に載せない
     const asking = f.request?.replace(/（[^）]*）$/, "").replace(/[。]$/, "");
     if (f.request && !MEDICAL.test(f.request) && !personalKind(f.request) && !PROMISE.test(f.request) && !REQUEST_BAD.test(asking)) finding.request = f.request;
     accepted.push(finding);

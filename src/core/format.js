@@ -238,7 +238,7 @@ export function planFieldList({ output, input, customs = [], plan }) {
   const careLabel = new Map(Object.entries(input?.mapping ?? {}).map(([header, t]) => [t, header]));
   const row = (path, name) => {
     const kind = inPlan.has(path) ? (inCare.has(path) ? "both" : "plan") : inCare.has(path) ? "care" : null;
-    return { path, label: careLabel.get(path) ?? label.get(path) ?? name, kind, mark: MARK[kind] ?? (ON_SHEET.has(path) ? "本人の1枚" : "様式の外") };
+    return { path, label: careLabel.get(path) ?? label.get(path) ?? name, kind, mark: MARK[kind] ?? (ON_SHEET.has(path) ? "共有する紙" : "様式の外") };
   };
   // 様式を変えたあと、前の様式だけの欄は、何か入っているときだけ残す
   const customRows = customs.map((c) => row(c.path, c.label)).filter((r) => r.kind || filled(plan && getAt(plan, r.path)));

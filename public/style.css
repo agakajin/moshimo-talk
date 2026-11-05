@@ -197,7 +197,7 @@ td.waiting { background: var(--warn-soft); color: var(--warn); }
 .sheet-notes p { margin: 2px 0; }
 
 @media print {
-  /* 本人の1枚だけを残す。隠すだけだと場所が残り、白紙のページが増える */
+  /* ご本人に共有する紙だけを残す。隠すだけだと場所が残り、白紙のページが増える */
   body { background: #fff; }
   body *:not(:has(#sheet)):not(#sheet):not(#sheet *) { display: none; }
   main, .panel, section { margin: 0; padding: 0; border: 0; box-shadow: none; }

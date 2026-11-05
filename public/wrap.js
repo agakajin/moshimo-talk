@@ -1,4 +1,4 @@
-// 訪問終了の画面。今日できたことと次の一歩、同意、本人の1枚、個別避難計画書の CSV、ケアプラン用の CSV、続き用ファイル
+// 訪問終了の画面。今日できたことと次の一歩、同意、ご本人に共有する紙、個別避難計画書の CSV、ケアプラン用の CSV、続き用ファイル
 import { toResumeFile } from "/core/plan.js";
 import { askedHelpers, buildInputRow, GROUP_LABEL, hasInputConsent, inputConsentGroups, planFieldList, requiredBlanks } from "/core/format.js";
 import { pendingRechecks } from "/core/merge.js";
@@ -29,7 +29,7 @@ export function startWrap(state, findings, config) {
   $("talk").hidden = true;
   $("wrap").hidden = false;
   document.querySelector(".top h1").textContent = "訪問終了";
-  document.querySelector(".top p").textContent = "今日できたことを確かめて、本人の1枚と渡すものを作ります。";
+  document.querySelector(".top p").textContent = "今日できたことを確かめて、ご本人に共有する紙と、渡すものを作ります。";
   window.scrollTo(0, 0);
 
   function renderSummary() {
@@ -52,7 +52,7 @@ export function startWrap(state, findings, config) {
     }));
   }
 
-  // 頼みごとの案は、本人に渡す1枚を作るここで選ぶ。点検の文が変わっても、選んだものは一覧に残して外せるようにする
+  // 頼みごとの案は、ご本人に共有する紙を作るここで選ぶ。点検の文が変わっても、選んだものは一覧に残して外せるようにする
   function renderRequests() {
     const current = state.findings?.() ?? findings;
     const options = [...new Set([...plan.requests, ...current.filter((f) => f.request).map((f) => f.request)])];
@@ -89,7 +89,7 @@ export function startWrap(state, findings, config) {
       renderConsent();
       renderCsvPreview();
     });
-    $("consentAlways").textContent = config.alwaysColumns?.length ? `同意が1つでもあれば、次の列は本人を確かめるために一緒に出ます：${config.alwaysColumns.join("、")}` : "";
+    $("consentAlways").textContent = config.alwaysColumns?.length ? `同意が1つでもあれば、次の列はご本人を確かめるために一緒に出ます：${config.alwaysColumns.join("、")}` : "";
     $("consentReset").hidden = !state.consentReset;
     $("consentRows").replaceChildren(...Object.entries(config.consentGroups).map(([group, def]) => {
       const select = el("select", { ariaLabel: def.label });

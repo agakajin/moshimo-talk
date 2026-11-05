@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <p class="demo-banner">架空データ専用のデモです。本物の利用者データは入れないでください。</p>
+  <p class="demo-banner">架空データ専用のデモです。実在の方のデータは入れないでください。</p>
   <header class="top">
     <h1>データをつなぐ</h1>
     <p>同じことを二度聞かないために、2つのデータを1つにつなぎます。</p>
@@ -37,7 +37,7 @@
         <span class="hero-arrow" aria-hidden="true">→</span>
         <div class="hero-part">
           <p class="hero-verb">3. 渡す</p>
-          <p class="hero-chip kind-hand">ご本人へ：本人の1枚</p>
+          <p class="hero-chip kind-hand">ご本人へ：共有する紙</p>
           <p class="hero-chip kind-plan">市へ：個別避難計画書</p>
           <p class="hero-chip kind-care">ケアマネへ：ケアプラン</p>
         </div>
@@ -304,11 +304,11 @@
       <div class="wrap-col">
       <div id="wrapTabs" class="tabs" role="group" aria-label="渡す相手"></div>
       <div id="sheetPanel" class="panel">
-        <h2>本人の1枚</h2>
+        <h2>ご本人に共有する紙</h2>
         <p class="hint">手伝う人が決まっていなくても渡せます。</p>
         <div id="requestBox" class="request-box">
           <h3>ご近所に頼めそうなこと</h3>
-          <p class="hint">全部選ばなくて大丈夫です。選んだものが本人の1枚に載ります。頼むのはご本人かご家族で、道具は相手に連絡しません。</p>
+          <p class="hint">全部選ばなくて大丈夫です。選んだものが、ご本人に共有する紙に載ります。頼むのはご本人かご家族で、道具は相手に連絡しません。</p>
           <div id="requests"></div>
         </div>
         <article id="sheet" class="sheet">
@@ -330,7 +330,7 @@
         <p id="consentReset" class="notice" hidden>様式を変えたので、渡す相手が変わりました。同意を聞き直してください。</p>
         <div id="consentAll" class="row consent-all"></div>
         <div id="consentRows"></div>
-        <p id="csvBlocked" class="hint">同意した項目がないので、個別避難計画書の CSV は出ません。本人の1枚はこのまま渡せます。</p>
+        <p id="csvBlocked" class="hint">同意した項目がないので、個別避難計画書の CSV は出ません。ご本人に共有する紙は、このまま渡せます。</p>
         <p id="csvCheckHint" class="hint">手伝う人の同意がない間は、人の話が入った文を隠します。隠しきれない言い方もあるので、下の内容を読んで確かめてください。</p>
         <details open><summary>出す内容を確かめる</summary><div class="scroll"><table id="csvPreview"></table></div></details>
         <div class="row">

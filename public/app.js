@@ -901,7 +901,7 @@ function renderWeek(plan, gaps) {
 function renderChecks(identity, plan) {
   const notes = [];
   const phone = identity["self.phone"];
-  if (phone && (phone.length < 10 || phone.length > 11)) notes.push("本人の電話番号の桁数を確かめてください。");
+  if (phone && (phone.length < 10 || phone.length > 11)) notes.push("ご本人の電話番号の桁数を確かめてください。");
   if (Object.hasOwn(identity, "self.birth") && !identity["self.birth"]) notes.push("生年月日を読み取れませんでした。");
   if (Object.hasOwn(identity, "self.postal") && !identity["self.postal"]) notes.push("郵便番号の桁数を確かめてください。");
   for (const part of plan.care.weekly.value?.unread ?? []) notes.push(`読めなかった予定があります：${part}`);
@@ -1023,7 +1023,7 @@ $("formatBack").addEventListener("click", () => {
     state.backToTalk = false;
     state.fromWrap = false;
     document.querySelector(".top h1").textContent = "訪問終了";
-    document.querySelector(".top p").textContent = "今日できたことを確かめて、本人の1枚と渡すものを作ります。";
+    document.querySelector(".top p").textContent = "今日できたことを確かめて、ご本人に共有する紙と、渡すものを作ります。";
     $("step4").hidden = true;
     $("wrap").hidden = false;
     document.body.classList.add("wide-mode");
