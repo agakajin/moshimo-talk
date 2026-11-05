@@ -93,7 +93,8 @@
       "id": "slope",
       "label": "坂・階段・狭い道",
       "look": "手段（車いす・車・送迎）と家のまわりの道が合っているか",
-      "opener": "家の前の階段は、どうやって降りますか？"
+      "opener": "家の前の階段は、どうやって降りますか？",
+      "fills": ["evacuation.route", "evacuation.means"]
     }
   ]
 }

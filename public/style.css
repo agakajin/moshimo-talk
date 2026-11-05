@@ -130,6 +130,9 @@ dd { margin: 0; }
 .plan-row.drop { outline: 2px dashed var(--accent); background: var(--accent-soft); }
 #planFields.dropping .plan-row { outline: 1px dashed var(--line); }
 .plan-row.goal-row { outline: 2px solid var(--accent); outline-offset: -1px; }
+/* 耳打ちで埋めたい欄は、耳打ちの枠と同じ色で示す */
+.plan-row.goal-ask, #planHelpers.goal-ask { outline: 3px solid #e0a148; outline-offset: -1px; background: var(--warn-soft); }
+.opener.interrupt .goal .chip { border-color: #e0a148; background: #fff; color: var(--warn); font-weight: 600; }
 #memos .loose { cursor: grab; background: var(--warn-soft); border-radius: 6px; padding: 2px 6px; margin-bottom: 4px; }
 .gap-top { margin-top: 18px !important; }
 .field-label { display: block; margin-top: 12px; font-size: 13px; color: var(--muted); }

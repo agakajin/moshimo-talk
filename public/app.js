@@ -1,7 +1,6 @@
 // 取り込みの画面。本物の値はこの画面の中だけで扱い、サーバーへは記号だけを送る
 import { decodeCsv, parseCsv } from "/core/csv.js";
-import { maskTable } from "/core/mask.js";
-import { findLeaks } from "/core/redact.js";
+import { findHeaderLeaks, maskTable } from "/core/mask.js";
 import { attachOutput, checkResumedFormat, DEFAULT_TARGETS, duplicateHeaders, expand, isOwnNumberColumn, OUTPUT_TARGETS, suspiciousHeaders } from "/core/format.js";
 import { chooseConflict, describeFlows, findPersonRow, mergeOutputRow, pendingRechecks } from "/core/merge.js";
 import { fromResumeFile, importRow, serviceGaps } from "/core/plan.js";
@@ -90,7 +89,8 @@ async function beginTalk(imported, options = {}) {
   document.body.classList.add("wide-mode");
   document.querySelector(".top h1").textContent = "訪問";
   document.querySelector(".top p").textContent = "話を聞いて、段取りと次の一歩を決めます。決めるのはご本人です。";
-  startTalk(imported, options);
+  // 耳打ちが埋める欄を、村の物差しから示すのに使う
+  startTalk(imported, { ...options, yardsticks: (await loadVillage().catch(() => null))?.yardsticks ?? [] });
 }
 
 function goTo(step) {
@@ -264,13 +264,11 @@ async function takeFormat(fileName, { headers, rows }, { confirmed = false } = {
 
 function renderMask() {
   const { payload, suspectHeaders } = state.masked;
-  // 「同居」列の値「同居」のように、見出しの言葉と同じ値は本物の値と見ない
-  const values = state.table.rows.flat().filter((v) => !payload.columns.some((c) => c.header.includes(v.trim())));
-  const leaks = findLeaks(payload, values);
+  const leaks = findHeaderLeaks(state.table, payload);
   const blocked = suspectHeaders.length > 0 || leaks.length > 0;
   $("suspect").hidden = !blocked;
   $("suspect").textContent = blocked
-    ? `見出しに、本物の値らしいものがあります。送らずに止めました。CSV の見出しを確かめてください。${suspectHeaders.length ? `（${suspectHeaders.join("、")}）` : ""}`
+    ? `見出しに、本物の値らしいものがあります。送らずに止めました。CSV の見出しを確かめてください。${suspectHeaders.length + leaks.length ? `（${[...suspectHeaders, ...leaks].join("、")}）` : ""}`
     : "";
   $("send").disabled = blocked;
 

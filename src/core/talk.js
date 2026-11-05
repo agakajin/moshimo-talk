@@ -30,4 +30,17 @@ export function nextTopic(plan, { gaps = null, skipped = [] } = {}) {
 }
 
 // 頼みごとの紙に必ず入れる文。AI に作らせない
+// 耳打ちがどの欄を埋めるための問いかけかを、物差しから決める。Claude の答えには頼らない
+// 村の物差しは設定の fills を使う。「様式の空き」は列が毎回違うので、欄を決めない
+const YARDSTICK_FILLS = {
+  最低ライン: ["evacuation.place", "helpers"],
+  時間帯: ["timeBands", "home.aloneHours"],
+  一本足: ["helpers", "contactMeans"],
+  持ち出し: ["carry"],
+};
+export function fillsOfFinding(finding, villageYardsticks = []) {
+  if (!finding) return [];
+  return villageYardsticks.find((y) => y.label === finding.yardstick)?.fills ?? YARDSTICK_FILLS[finding.yardstick] ?? [];
+}
+
 export const REQUEST_NOTE = "お願いできる範囲で大丈夫です。必ず来られるとは限りません。義務ではありません。";

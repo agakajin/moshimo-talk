@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { decodeCsv, parseCsv } from "../src/core/csv.js";
 import { normalizeAddress, normalizeDate, normalizeKana, normalizeName, normalizePhone, normalizePostal } from "../src/core/normalize.js";
-import { classifyValue, maskTable } from "../src/core/mask.js";
+import { findHeaderLeaks, classifyValue, maskTable } from "../src/core/mask.js";
 import { parseWeekly, weekdaysWithoutService } from "../src/core/schedule.js";
 import { findLeaks, redact } from "../src/core/redact.js";
 import { importRow, serviceGaps } from "../src/core/plan.js";
+import { fillsOfFinding } from "../src/core/talk.js";
 
 const load = (f) => parseCsv(decodeCsv(readFileSync(new URL(`../samples/${f}`, import.meta.url))));
 const mapping = JSON.parse(readFileSync(new URL("../samples/keahakka.mapping.json", import.meta.url), "utf-8"));
@@ -77,6 +78,28 @@ test("備考は送らない", () => {
   assert.deepEqual(notes.samples, []);
 });
 
+test("見出しのない CSV の介護度や性別を、見出しの値として止める", () => {
+  const { suspectHeaders } = maskTable({ headers: ["佐藤花子", "要介護1", "女"], rows: [["鈴木梅", "要介護2", "女"]] });
+  assert.deepEqual(suspectHeaders, ["要介護1", "女"]);
+});
+
+test("週間予定：現場でよくある書き方を読む", () => {
+  const days = (raw) => parseWeekly(raw).items.map((i) => `${i.days.join("")} ${i.kind} ${i.start}-${i.end}`);
+  assert.deepEqual(days("月水金 通所介護 9:00-16:00"), ["月水金 通所介護 09:00-16:00"]);
+  assert.deepEqual(days("月 通所介護 9:30～16:00／水 訪問介護（入浴介助）10:00～11:00"), ["月 通所介護 09:30-16:00", "水 訪問介護 10:00-11:00"]);
+  assert.deepEqual(days("月:通所介護 9:00-16:00／土:訪問リハビリ 14:00-14:40"), ["月 通所介護 09:00-16:00", "土 訪問リハビリ 14:00-14:40"]);
+  assert.deepEqual(days("月:通所介護 9時30分から16時"), ["月 通所介護 09:30-16:00"]);
+  // 曜日の / は区切りと見ない。1件のまま読む
+  assert.deepEqual(days("月/水/金 デイサービス 9:00-16:00"), ["月水金 デイサービス 09:00-16:00"]);
+  // 休止や隔週の補足は外さず、読めない扱いにする
+  for (const raw of ["月 デイサービス(入院中で停止) 9:00-16:00", "月 デイサービス(2週に1回) 9:00-16:00", "月(体験) デイサービス 9:00-16:00"]) assert.deepEqual(days(raw), [], raw);
+  // 時間帯のあとに曜日が残る書き方は、黙って落とさず読めない扱いにする
+  assert.deepEqual(parseWeekly("月 デイサービス 9:00-16:00 火/水 訪問介護 10:00-11:00").unread.some((u) => u.includes("火")), true);
+  for (const raw of ["月 デイサービス 9:00-16:00(火も)", "月 デイサービス 9:00-16:00 送迎(火)"]) assert.deepEqual(days(raw), [], raw);
+  // 補足の中に曜日があるものは読めない扱いのまま
+  assert.deepEqual(days("通所介護(月水) 9:00-16:00"), []);
+});
+
 test("見出しに本物の値があれば止める", () => {
   const { suspectHeaders } = maskTable({ headers: ["岡野 ハル", "介護度"], rows: [["岡野 ハル", "要介護1"]] });
   assert.deepEqual(suspectHeaders, ["岡野 ハル"]);
@@ -86,6 +109,60 @@ test("Claude に送る中身に本物の値が入らない（両方のサンプ�
   for (const table of [okano, yoshikawa]) {
     const { payload } = maskTable(table);
     assert.deepEqual(findLeaks(payload, table.rows.flat()), []);
+  }
+});
+
+test("ふつうの言葉が見出しと重なっても、本物の値の漏れと見ない", () => {
+  const table = {
+    headers: ["服薬", "階段", "聴力", "認知症", "歩行状態", "weekly_services", "家族"],
+    rows: [["服薬あり", "階段不可", "聴力低下", "認知症あり", "杖歩行", "Tue day service", "家族あり"]],
+  };
+  assert.deepEqual(findHeaderLeaks(table, maskTable(table).payload), []);
+  const person = { headers: ["緊急連絡先", "家族構成", "キーパーソン", "本人の電話"], rows: [["家族", "夫婦", "本人", "000-0000-0001"]] };
+  assert.deepEqual(findHeaderLeaks(person, maskTable(person).payload), []);
+  const across = { headers: ["避難の必要性", "緊急の連絡", "入浴介助", "福祉用具利用", "訪問看護", "長男の連絡先"], rows: [["不要", "必要", "全介助", "車椅子利用", "かかりつけ看護師", "長男"]] };
+  assert.deepEqual(findHeaderLeaks(across, maskTable(across).payload), []);
+  const own = { headers: ["避難の必要性"], rows: [["必要"]] };
+  assert.deepEqual(findHeaderLeaks(own, maskTable(own).payload), []);
+});
+
+test("見出しに残った名前は、どの列の値でも、名字だけでも見つける", () => {
+  const cases = [
+    [["氏名", "岡野さんの欄"], ["岡野 ハル", "なし"], "岡野 ハル"],
+    [["フリガナ", "オカノ記入欄"], ["オカノ ハル", "なし"], "オカノ ハル"],
+    [["緊急連絡先", "野田の続柄"], ["野田 修", "長男"], "野田 修"],
+    // 名前の列に見えない見出しでも調べる
+    [["世帯主", "岡野の備考"], ["岡野 ハル", "なし"], "岡野 ハル"],
+    [["後見人", "岡野の備考"], ["岡野 ハル", "なし"], "岡野 ハル"],
+    [["ふりがな", "おかのはるの備考"], ["おかの はる", "なし"], "おかの はる"],
+    // 見出しの中で、ふつうの言葉と同じ字が姓名の境目をまたいでも見つける
+    [["氏名", "麻生活男"], ["麻生 修", "なし"], "麻生 修"],
+    [["氏名", "吉備考一"], ["吉備 修", "なし"], "吉備 修"],
+    [["氏名", "諏訪問子"], ["諏訪 修", "なし"], "諏訪 修"],
+    [["name", "HaradaYuki"], ["Harada Yuki", "none"], "Harada Yuki"],
+    [["name", "Sadayo_memo"], ["Okano Sadayo", "none"], "Okano Sadayo"],
+    // 名前の列に見えない列の値でも、途中の字で名前を壊さない
+    [["協力者", "毛利の欄"], ["毛利用子", "なし"], "毛利用子"],
+    [["毛利花子", "要介護1"], ["毛利用子", "要介護2"], "毛利用子"],
+    [["協力者", "三男さんの欄"], ["鈴木三男", "なし"], "鈴木三男"],
+    [["協力者", "訪問の欄"], ["訪問 花子", "なし"], "訪問 花子"],
+    [["name", "Day_memo"], ["Doris Day", "none"], "Doris Day"],
+    // 自分の列の見出しに入った名字、住所の一部、電話の下4桁
+    [["氏名（岡野）", "要介護度"], ["岡野", "要介護1"], "岡野"],
+    [["住所", "川上12-3の坂"], ["ハッカ村字川上12-3", "なし"], "ハッカ村字川上12-3"],
+    [["電話", "1234の持ち主"], ["000-0000-1234", "なし"], "000-0000-1234"],
+    [["緊急連絡先", "山田の欄"], ["長女・山田", "なし"], "長女・山田"],
+    [["緊急連絡先", "山田の欄"], ["家族（山田）", "なし"], "家族（山田）"],
+    // 名前の列の値は、ふつうの言葉を含んでいても除かない
+    [["氏名", "訪問の欄"], ["訪問 花子", "なし"], "訪問 花子"],
+    [["家族の氏名", "麻生の欄"], ["麻生活男", "なし"], "麻生活男"],
+    // 見出しのない CSV の1行目に同じ名字が残っている
+    [["岡野ハル", "要介護1"], ["岡野 修", "要介護2"], "岡野 修"],
+    [["TEL", "000-0000-1234の持ち主"], ["000-0000-1234", "本人"], "000-0000-1234"],
+  ];
+  for (const [headers, row, want] of cases) {
+    const table = { headers, rows: [row] };
+    assert.deepEqual(findHeaderLeaks(table, maskTable(table).payload), [want], headers.join());
   }
 });
 
@@ -138,4 +215,12 @@ test("𠮷川さんは列が足りなくても止まらず、氏名の字が変�
   assert.equal(plan.care.mobility.status, "undecided");
   assert.equal(plan.care.weekly.status, "undecided");
   assert.equal(serviceGaps(plan), null);
+});
+
+test("耳打ちが埋める欄は、物差しから決まる", () => {
+  const village = JSON.parse(readFileSync(new URL("../samples/hakka-village.config.json", import.meta.url)));
+  assert.deepEqual(fillsOfFinding({ yardstick: "坂・階段・狭い道" }, village.yardsticks), ["evacuation.route", "evacuation.means"]);
+  assert.deepEqual(fillsOfFinding({ yardstick: "持ち出し" }, village.yardsticks), ["carry"]);
+  assert.deepEqual(fillsOfFinding({ yardstick: "様式の空き" }, village.yardsticks), []);
+  assert.deepEqual(fillsOfFinding(null), []);
 });

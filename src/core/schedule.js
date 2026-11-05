@@ -2,9 +2,12 @@
 // 曜日を増やして読むと、聞くべき空きの曜日が黙って消える。確かな形だけを読み、迷うものは読めない扱いにして人に見せる
 import { normalizeText } from "./normalize.js";
 
-const KINDS = ["デイサービス", "デイケア", "訪問介護", "訪問看護", "訪問リハビリ", "ショートステイ"];
+const KINDS = ["デイサービス", "デイケア", "訪問介護", "訪問看護", "訪問リハビリ", "訪問リハ", "通所介護", "通所リハビリ", "通所リハ", "ショートステイ"];
 const WEEK = ["月", "火", "水", "木", "金", "土", "日"];
 const WEEKDAYS = WEEK.slice(0, 5);
+
+// サービスの中身を書いた補足だけを外す。「(停止中)」「(2週に1回)」のような補足は外さず、読めない扱いにする
+const SERVICE_NOTE = /\((?:入浴介助|身体介護|生活援助|身体・生活|入浴|機能訓練|個別機能訓練|送迎あり|送迎なし)\)/g;
 
 const pad = (t) => t.replace(/^(\d):/, "0$1:");
 
@@ -20,7 +23,8 @@ const OTHER_DAYS = new RegExp(`${NOT_AFTER}${DAY}(?:曜日?)?(?:[\\s・、,:/]|$
 
 function daysBefore(text, kind) {
   // 種類の語と「毎週」は、曜日の前の区切りとして扱う
-  const before = text.replace(kind, " ").replace(/毎週/g, " ").replace(/[−―‐–—〜]/g, "-").trim();
+  // 「水:訪問介護(入浴介助)」の区切りと補足は、曜日の前の飾りとして外す
+  const before = text.replace(kind, " ").replace(SERVICE_NOTE, " ").replace(/毎週/g, " ").replace(/[−―‐–—〜]/g, "-").trim().replace(/\s*:$/, "");
   if (/(?:^|\s)毎日$/.test(before)) return WEEK;
   if (/(?:^|\s)平日$/.test(before)) return WEEKDAYS;
   const run = before.match(DAY_RUN);
@@ -44,13 +48,16 @@ export function parseWeekly(raw) {
   const items = [];
   const unread = [];
   // 「月、水、金」の読点では切らない
-  for (const part of text.split(/[;\n]|、(?![月火水木金土日](?:曜日?)?(?:[、・\s]|\d))/).map((p) => p.trim()).filter(Boolean)) {
+  // 「月水金 デイサービス 9:00-16:00/火 訪問介護 10:00-11:00」は1件ごとに切る。時間帯のあとの / だけを区切りと見る（「月/水/金」は切らない）
+  for (const part of text.split(/[;\n]|、(?![月火水木金土日](?:曜日?)?(?:[、・\s]|\d))|(?<=\d{1,2}:\d{2}[^/]*)\/(?=[月火水木金土日])/).map((p) => p.trim()).filter(Boolean)) {
     const kind = KINDS.find((k) => part.includes(k));
-    const time = part.match(/(\d{1,2}:\d{2})\s*[-~〜]\s*(\d{1,2}:\d{2})/);
+    const time = part.match(/(\d{1,2}:\d{2})\s*(?:[-~〜]|から)\s*(\d{1,2}:\d{2})/);
     // 1つの区切りに時間帯が2つあると、2つ目を黙って落とすので、読めない扱いにする
-    const ranges = part.match(/\d{1,2}:\d{2}\s*[-~〜]\s*\d{1,2}:\d{2}/g)?.length ?? 0;
+    const ranges = part.match(/\d{1,2}:\d{2}\s*(?:[-~〜]|から)\s*\d{1,2}:\d{2}/g)?.length ?? 0;
     const inOrder = time && minutesOf(time[1]) !== null && minutesOf(time[2]) !== null && minutesOf(time[1]) < minutesOf(time[2]);
-    const days = kind && inOrder && ranges === 1 && !NOT_WEEKLY.test(part.replace(/\d{1,2}:\d{2}/g, " ")) ? daysBefore(part.slice(0, time.index), kind) : [];
+    // 時間帯のあとに曜日が残っていたら（「9:00-16:00 火」）、その曜日を黙って落とさない
+    const daysAfter = time && /[月火水木金土日]/.test(part.slice(time.index + time[0].length));
+    const days = kind && inOrder && ranges === 1 && !daysAfter && !NOT_WEEKLY.test(part.replace(/\d{1,2}:\d{2}/g, " ")) ? daysBefore(part.slice(0, time.index), kind) : [];
     if (days.length === 0) { unread.push(part); continue; }
     items.push({ kind, days, start: pad(time[1]), end: pad(time[2]) });
   }

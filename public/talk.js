@@ -4,7 +4,7 @@ import { blankColumns, planFieldList, requiredBlanks } from "/core/format.js";
 import { pendingRechecks } from "/core/merge.js";
 import { parseMinutes } from "/core/normalize.js";
 import { findLeaks, redact, redactDeep } from "/core/redact.js";
-import { nextTopic } from "/core/talk.js";
+import { nextTopic, fillsOfFinding } from "/core/talk.js";
 import { chooseKey, createPushToTalk, DEFAULT_KEY, keyCode, keyLabel, keyTriggers } from "/core/voice.js";
 import { createLatest, createQueue } from "/core/work.js";
 import { startWrap } from "/wrap.js";
@@ -38,7 +38,7 @@ async function post(url, body) {
   return data;
 }
 
-export function startTalk(state, { script = null } = {}) {
+export function startTalk(state, { script = null, yardsticks = [] } = {}) {
   const { identity, plan } = state;
   state.people ??= [];
   let FIELDS = planFieldList(state);
@@ -67,6 +67,7 @@ export function startTalk(state, { script = null } = {}) {
   let dragged = null;
   const planRows = new Map();
   let goalPaths = new Set();
+  let goalAsk = false;
   const helperRows = new Map();
   const changeBoxes = new Map();
   // 様式を変えて欄を作り直すとき、開いている箱を出し直すための控え
@@ -156,7 +157,7 @@ export function startTalk(state, { script = null } = {}) {
     $("openerLabel").textContent = interrupt ? `気になること（${interrupt.yardstick}）` : "話のきっかけ";
     $("opener").textContent = interrupt?.opener ?? topic?.text ?? "ひと通り話せました。";
     $("skip").hidden = !topic && !interrupt;
-    renderGoal(interrupt ? null : topic);
+    renderGoal(interrupt ? { fills: fillsOfFinding(interrupt, yardsticks), ask: true } : topic);
   }
 
   // 最初の1問は暮らしの話から入る。分かっている寝室を言うので、二度聞かないことも伝わる
@@ -186,9 +187,10 @@ export function startTalk(state, { script = null } = {}) {
     return nextTopic(plan, { gaps, skipped });
   }
 
-  // この話で埋めたい欄を見せる
+  // この話で埋めたい欄を見せる。耳打ちのときは、その問いで埋めたい欄を耳打ちの色で示す
   function renderGoal(topic) {
     goalPaths = new Set(topic?.fills ?? []);
+    goalAsk = Boolean(topic?.ask);
     const chips = [...goalPaths].map((path) => {
       const name = path === "helpers" ? "近くの人" : LABEL.get(path);
       if (!name) return null;
@@ -200,12 +202,16 @@ export function startTalk(state, { script = null } = {}) {
       });
       return button;
     }).filter(Boolean);
-    $("openerGoal").replaceChildren(...(chips.length ? [el("span", { textContent: "この話で埋める欄：" }), ...chips] : interrupt ? [el("span", { textContent: "計画の穴を確かめる問いかけです" })] : []));
+    $("openerGoal").replaceChildren(...(chips.length ? [el("span", { textContent: goalAsk ? "この問いかけで埋める欄：" : "この話で埋める欄：" }), ...chips] : interrupt ? [el("span", { textContent: "計画の穴を確かめる問いかけです" })] : []));
     markGoal();
   }
 
   function markGoal() {
-    for (const [path, { row }] of planRows) row.classList.toggle("goal-row", goalPaths.has(path));
+    for (const [path, { row }] of planRows) {
+      row.classList.toggle("goal-row", goalPaths.has(path));
+      row.classList.toggle("goal-ask", goalAsk && goalPaths.has(path));
+    }
+    $("planHelpers")?.classList.toggle("goal-ask", goalAsk && goalPaths.has("helpers"));
   }
 
   function renderWeek() {
