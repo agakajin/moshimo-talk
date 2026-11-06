@@ -94,6 +94,8 @@ async function beginTalk(imported, options = {}) {
 }
 
 function goTo(step) {
+  // まとめの画面から開いた様式の画面を離れたら、戻り先の控えは使わない
+  if (step !== 4) state.summarySnapshot = null;
   // 終わった段階は積み重ねず、今の段階だけを見せる
   for (const i of [1, 2, 4, 5]) {
     $(`step${i}`).hidden = i !== step;
@@ -821,6 +823,8 @@ function reopenFormat() {
 function openFormat() {
   state.backToTalk = true;
   state.fromWrap = !$("wrap").hidden;
+  // 訪問の途中は話している方を変えられない。選べるように見せない
+  $("who").disabled = true;
   reopenFormat();
   $("talk").hidden = true;
   $("wrap").hidden = true;
@@ -830,6 +834,7 @@ function openFormat() {
 }
 
 function closeFormat() {
+  $("who").disabled = false;
   state.backToTalk = false;
   state.fromWrap = false;
   document.querySelector(".top h1").textContent = "訪問";
@@ -1014,6 +1019,7 @@ $("formatBack").addEventListener("click", () => {
   $("formatMint").disabled = false;
   if (state.fromWrap) {
     // 訪問終了の画面から開いたときは、そこへ戻す
+    $("who").disabled = false;
     state.backToTalk = false;
     state.fromWrap = false;
     document.querySelector(".top h1").textContent = "訪問終了";
@@ -1023,11 +1029,18 @@ $("formatBack").addEventListener("click", () => {
     document.body.classList.add("wide-mode");
     window.scrollTo(0, 0);
   } else if (state.backToTalk) closeFormat();
-  else goTo(state.table ? 2 : 1);
+  else if (state.summarySnapshot) {
+    // まとめの画面から開いたときは、選び直す前のまとめへ戻す（送り直さない）
+    const snap = state.summarySnapshot;
+    Object.assign(state, { imported: snap.imported, mapping: snap.mapping, formatName: snap.formatName });
+    goTo(5);
+  } else goTo(state.table ? 2 : 1);
 });
 $("stepFormat").addEventListener("click", () => {
+  const snap = { imported: state.imported, mapping: state.mapping, formatName: state.formatName };
   reopenFormat();
   goTo(4);
+  state.summarySnapshot = snap;
 });
 $("changeFormat").addEventListener("click", openFormat);
 $("wrapFormat").addEventListener("click", openFormat);

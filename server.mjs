@@ -56,7 +56,8 @@ function readBody(req) {
     const chunks = [];
     req.on("data", (c) => {
       size += c.length;
-      if (size > MAX_BODY) { reject(new Error("too large")); req.destroy(); return; }
+      // 接続を切ると画面に理由が出ないので、受け取りをやめて 413 で返す
+      if (size > MAX_BODY) { req.removeAllListeners("data"); req.pause(); reject(Object.assign(new Error("too large"), { tooLarge: true })); return; }
       chunks.push(c);
     });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
@@ -104,7 +105,11 @@ async function handleApi(req, res, route) {
   let payload;
   try {
     payload = JSON.parse(await readBody(req));
-  } catch {
+  } catch (e) {
+    if (e.tooLarge) {
+      res.setHeader("Connection", "close");
+      return sendJson(res, 413, { errors: ["送る中身が大きすぎます。分けて入れてください"] });
+    }
     return sendJson(res, 400, { errors: ["内容を読めませんでした"] });
   }
   try {
